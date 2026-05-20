@@ -3,10 +3,17 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from django.core.cache import cache
 from channels.db import database_sync_to_async
 
+# consumers.py me sirf connect function ko is se replace karo:
+
 class GameConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.table_slug = self.scope['url_route']['kwargs']['table_slug']
-        self.room_group_name = f'arena_{self.table_slug}'
+        
+        # 🔴 NAYA: Frontend se room_id nikalo
+        self.room_id = self.scope['url_route']['kwargs']['room_id']
+        
+        # 🔴 NAYA: Har 2 players ke liye ek UNIQUE room banega, mix nahi honge
+        self.room_group_name = f'arena_{self.table_slug}_{self.room_id}'
 
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()
@@ -25,6 +32,8 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'player': self.gamer_tag
             }
         )
+        
+    
 
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)

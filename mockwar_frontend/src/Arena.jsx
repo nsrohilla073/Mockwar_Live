@@ -115,7 +115,11 @@ function Arena() {
           setTimeLeft(qTime); 
         }
 
-        ws.current = new WebSocket(`${WS_BASE}/ws/arena/${tableId}/`);
+        // NAYA: Backend se aayi hui room_id ko read karo
+        const matchRoomId = res.data.room_id || `room_${Date.now()}`;
+        
+        // NAYA: URL me tableId ke aage matchRoomId laga do
+        ws.current = new WebSocket(`${WS_BASE}/ws/arena/${tableId}/${matchRoomId}/`);
         
         ws.current.onopen = () => {
             sendMyScore(0); 
