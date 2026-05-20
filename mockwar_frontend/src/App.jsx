@@ -17,7 +17,7 @@ function App() {
   const [winningBalance, setWinningBalance] = useState(0.0);
   const [username, setUsername] = useState("Player");
   const [liveTables, setLiveTables] = useState([]);
-
+  const [isJoining, setIsJoining] = useState(false);
   // 🕒 Views
   const [currentView, setCurrentView] = useState("lobby");
   const [historyData, setHistoryData] = useState({ matches: [], transactions: [] });
@@ -213,11 +213,17 @@ function App() {
   };
   
   const handlePlayGame = async (entryFee, gameId) => {
+    if (isJoining) return; // 🔒 डबल क्लिक लॉक
+    
     if (walletBalance >= entryFee) {
+      setIsJoining(true); // ताला बंद
       try {
         const response = await axios.post(`${API_BASE}/api/game/play/`, { entry_fee: entryFee }, { headers: { Authorization: `Bearer ${token}` } });
         if (response.data.success) { navigate(`/arena/${gameId}`); }
-      } catch (error) { showAppAlert("Error", "Couldn't secure entry fee. Try again.", "error"); }
+      } catch (error) { 
+        showAppAlert("Error", "Couldn't secure entry fee. Try again.", "error"); 
+        setIsJoining(false); // ताला खोल दो
+      }
     } else {
       showAppAlert("Low Balance", `You need ₹${entryFee} to play. Please Add Cash.`, "error");
     }
@@ -374,7 +380,7 @@ function App() {
         <div className="max-w-xl mx-auto px-4 py-3 flex justify-between items-center w-full">
           <div className="flex items-center gap-2 sm:gap-3 cursor-pointer group" onClick={() => setCurrentView("lobby")}>
             <div className="relative"><Trophy size={26} className="text-yellow-400 relative z-10 drop-shadow-[0_0_10px_rgba(234,179,8,0.8)] group-hover:scale-110 transition-transform" /></div>
-            <div className="flex flex-col"><h1 className="text-xl sm:text-2xl font-black italic tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400 leading-none">MOCKWAR</h1><p className="text-[7px] sm:text-[9px] text-blue-400 font-bold uppercase tracking-widest mt-0.5">Speed & Skill Arena</p></div>
+            <div className="flex flex-col"><h1 className="text-xl sm:text-2xl font-black italic tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400 leading-normal py-1">MOCKWAR</h1><p className="text-[7px] sm:text-[9px] text-blue-400 font-bold uppercase tracking-widest mt-0.5">Speed & Skill Arena</p></div>
           </div>
           
           <div className="flex items-center gap-2 sm:gap-3">

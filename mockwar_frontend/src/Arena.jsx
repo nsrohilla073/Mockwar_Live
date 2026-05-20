@@ -22,7 +22,7 @@ function Arena() {
       audio.play().catch(e => console.log("Sound play error:", e));
     }
   };
-
+  const apiCalled = useRef(false); // 🔒 नया ताला
   // 🕒 Matchmaking States
   const [maxPlayers, setMaxPlayers] = useState(2); 
   const maxPlayersRef = useRef(2); 
@@ -386,6 +386,8 @@ function Arena() {
 
   // 5. 🏆 FINALLY: REFEREE SENDS RESULT -> WE HIT API
   const handleMatchResult = async (data) => {
+      if (apiCalled.current) return;
+      apiCalled.current = true;
       setGameState("finished");
       setApiLoading(true);
 
