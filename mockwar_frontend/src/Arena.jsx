@@ -560,32 +560,71 @@ function Arena() {
           )}
 
           {isTypingMode && (
-            <div className="space-y-4">
-              <div className="flex justify-between px-2 font-black text-xs uppercase tracking-wider bg-slate-900/50 py-2 rounded-lg border border-slate-800">
-                <span className="text-purple-400 flex items-center gap-1.5"><Zap size={14}/> Speed: {wpm} WPM</span>
-                <span className="text-emerald-400 flex items-center gap-1.5"><Crosshair size={14}/> Accuracy: {accuracy}%</span>
+            <div className="space-y-4 w-full">
+              <div className="flex justify-between px-4 font-black text-xs uppercase tracking-wider bg-slate-900/80 py-3 rounded-xl border border-slate-700 shadow-inner">
+                <span className="text-purple-400 flex items-center gap-1.5"><Zap size={16}/> Speed: {wpm} WPM</span>
+                <span className="text-emerald-400 flex items-center gap-1.5"><Crosshair size={16}/> Accuracy: {accuracy}%</span>
               </div>
-              <div className="bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl border border-slate-700/80 text-lg leading-relaxed select-none font-mono shadow-xl text-justify tracking-wide relative overflow-hidden">
-                <div className="absolute left-0 top-0 w-1 h-full bg-blue-500"></div>
-                {targetParagraph.split("").map((char, index) => {
-                  let color = "text-slate-500";
-                  if (index < typedText.length) {
-                    color = typedText[index] === char ? "text-emerald-400 font-bold drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]" : "text-red-400 bg-red-500/20 rounded px-0.5 border border-red-500/30";
-                  }
-                  return <span key={index} className={color}>{char}</span>;
-                })}
+
+              {/* 🚀 THE PRO TYPING ARENA (MonkeyType Style) */}
+              <div 
+                className="relative w-full bg-slate-950/80 backdrop-blur-md p-6 md:p-8 rounded-[2rem] border border-slate-700/80 shadow-[0_0_40px_rgba(0,0,0,0.5)] overflow-hidden cursor-text group" 
+                onClick={() => document.getElementById('hidden-typer')?.focus()}
+              >
+                
+                {/* Active Focus Glow (जब टाइपिंग कर रहे हों) */}
+                <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-focus-within:opacity-100 transition-opacity pointer-events-none"></div>
+
+                {/* Rendered Text with Live Cursor */}
+                <div className="text-xl md:text-3xl leading-relaxed md:leading-loose font-mono tracking-wide text-left relative z-10 pointer-events-none flex flex-wrap">
+                  {targetParagraph.split("").map((char, index) => {
+                    let charStyle = "text-slate-600"; // डिफ़ॉल्ट (जो अभी टाइप नहीं हुआ)
+                    let cursorStyle = "";
+
+                    if (index < typedText.length) {
+                      // जो अक्षर टाइप हो चुके हैं
+                      charStyle = typedText[index] === char 
+                        ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.4)]" // सही 
+                        : "text-red-400 bg-red-500/20 rounded-sm border-b-4 border-red-500"; // गलत
+                    } else if (index === typedText.length) {
+                      // 🌟 THE CURRENT CHARACTER (जहाँ कर्सर है)
+                      charStyle = "text-slate-100 font-bold drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]";
+                      cursorStyle = "border-l-[3px] border-blue-500 animate-pulse bg-blue-500/20 rounded-r-sm";
+                    }
+
+                    // स्पेस (Space) को सही से दिखाने के लिए \u00A0 का इस्तेमाल
+                    const displayChar = char === " " ? "\u00A0" : char; 
+
+                    return (
+                      <span key={index} className={`relative transition-colors duration-100 ${charStyle} ${cursorStyle}`}>
+                        {displayChar}
+                      </span>
+                    );
+                  })}
+                </div>
+                
+                {/* Hidden Textarea (यह दिखेगा नहीं, लेकिन मोबाइल कीबोर्ड इसी से आएगा) */}
+                <textarea
+                  id="hidden-typer"
+                  autoFocus
+                  value={typedText}
+                  onChange={(e) => {
+                      // टेक्स्ट को टारगेट पैराग्राफ से लंबा नहीं होने देगा
+                      if (e.target.value.length <= targetParagraph.length) {
+                          handleTypingChange(e);
+                      }
+                  }}
+                  onPaste={handlePaste}
+                  onCopy={(e) => e.preventDefault()}
+                  autoComplete="off"
+                  spellCheck="false"
+                  className="absolute inset-0 w-full h-full opacity-0 resize-none z-20 cursor-text"
+                />
               </div>
-              
-              <textarea
-                value={typedText}
-                onChange={handleTypingChange}
-                onPaste={handlePaste}
-                onCopy={(e) => e.preventDefault()}
-                autoComplete="off"
-                spellCheck="false"
-                placeholder="Type perfectly... (Paste is disabled!)"
-                className="w-full bg-slate-950/80 backdrop-blur-md border-2 border-slate-800 focus:border-blue-500 rounded-2xl p-5 text-slate-200 font-mono outline-none h-32 resize-none text-base shadow-inner transition-all placeholder:text-slate-700"
-              />
+
+              <p className="text-center text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-2 animate-pulse">
+                 Tap on the text box to start typing
+              </p>
             </div>
           )}
         </div>
