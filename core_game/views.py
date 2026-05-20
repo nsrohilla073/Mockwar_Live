@@ -562,8 +562,8 @@ class GetGameContentAPIView(APIView):
                         "max_players": max_players
                     }
 
-            # 🔥 Cache timeout is 1 second so you get a NEW question immediately upon playing again
-            cache.set(cache_key, game_data, timeout=1)
+            # 🔥 Cache timeout is 120 second so you get a NEW question immediately upon playing again
+            cache.set(cache_key, game_data, timeout=120)
             print("✅ AI Content Generated & Cached successfully!")
             return Response(game_data, status=status.HTTP_200_OK)
 
