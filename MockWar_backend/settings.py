@@ -52,7 +52,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'corsheaders.middleware.CorsMiddleware', # CORS handles connectivity
+    'whitenoise.middleware.WhiteNoiseMiddleware',  
+    'corsheaders.middleware.CorsMiddleware', 
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -113,7 +114,10 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
+CSRF_TRUSTED_ORIGINS = [
+    'https://mockwar-backend.onrender.com',
+    'https://mockwar-frontend.vercel.app',
+]
 
 # ==========================================
 # 🔐 NETWORKING & AUTHENTICATION (API Security)

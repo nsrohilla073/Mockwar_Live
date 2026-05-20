@@ -336,7 +336,7 @@ class FirebaseLoginAPIView(APIView):
 class CompleteRegistrationAPIView(APIView):
     authentication_classes = []
     permission_classes = []
-
+    @transaction.atomic
     def post(self, request):
         uid = request.data.get('uid')
         name = request.data.get('name', '').strip()
