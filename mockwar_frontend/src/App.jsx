@@ -1,8 +1,9 @@
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import React, { useState, useEffect } from "react";
 import {
   Wallet, User, Trophy, Zap, LogOut, History, ArrowLeft, Activity, IndianRupee,
   Shield, ArrowUpRight, AlertCircle, CheckCircle2, X, Users, HelpCircle, Hourglass,
-  Gift, Share2, Copy, Check, Sparkles, Coins, Swords, Award, Crown, Loader2
+  Gift, Share2, Copy, Check, Sparkles, Coins, Swords, Award, Crown, Loader2, Receipt
 } from "lucide-react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
@@ -101,7 +102,6 @@ function App() {
   }, [currentView, promoSlides.length]);
 
 
-  // 🔥 FIX: Oxc Parser Bug Fixed by using standard string concatenation
   const handleCopyReferral = () => {
     const safeTag = username ? username.toUpperCase() : "PLAYER";
     const refLink = "https://mockwar.in/join?ref=" + safeTag;
@@ -131,7 +131,6 @@ function App() {
     }
   };
 
-  // 🔥 FETCH LEADERBOARD LOGIC
   const fetchGlobalLeaderboard = async (slug) => {
     setLeaderboardCategory(slug);
     setLeaderboardLoading(true);
@@ -231,7 +230,7 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-20 selection:bg-blue-500 selection:text-white relative">
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-24 selection:bg-blue-500 selection:text-white relative">
       
       {/* ALERT MODAL */}
       {alertConfig.show && (
@@ -394,14 +393,6 @@ function App() {
             <div onClick={() => setWalletModal(true)} className="flex items-center bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-700/50 shadow-inner hover:bg-slate-800 transition-colors cursor-pointer group">
               <Wallet size={16} className="text-yellow-400 group-hover:scale-110 transition-transform" /><span className="font-black text-sm text-yellow-400 ml-1.5">₹{walletBalance.toFixed(0)}</span>
             </div>
-
-            <button onClick={() => setCurrentView("profile")} className="relative p-2 bg-slate-900 hover:bg-slate-800 rounded-lg border border-slate-700 transition-colors shadow-lg cursor-pointer">
-              <User size={16} className="text-slate-300" /><div className="absolute -bottom-1 -right-1 bg-emerald-500 w-2.5 h-2.5 rounded-full border-2 border-slate-900"></div>
-            </button>
-
-            <button onClick={currentView === "history" ? () => setCurrentView("lobby") : fetchHistory} className="p-2 bg-slate-900 hover:bg-slate-800 rounded-lg border border-slate-700 transition-colors shadow-lg hidden sm:block cursor-pointer">
-              {currentView === "history" ? <ArrowLeft size={16} className="text-slate-200" /> : <History size={16} className="text-blue-400" />}
-            </button>
           </div>
         </div>
       </header>
@@ -595,7 +586,7 @@ function App() {
 
       {/* PROFILE VIEW */}
       {currentView === "profile" && profileData && (
-        <div className="max-w-xl mx-auto p-4 space-y-6 animate-fade-in w-full">
+        <div className="max-w-xl mx-auto p-4 space-y-6 animate-fade-in w-full pb-8">
           <h2 className="text-xl font-black uppercase tracking-wider text-slate-300 flex items-center gap-2 px-1"><Shield size={20} className="text-blue-500" /> Gamer Identity</h2>
           <div className="bg-gradient-to-br from-slate-900 to-slate-950 p-6 rounded-3xl border border-slate-800 shadow-2xl relative overflow-hidden">
             <div className="absolute -right-10 -top-10 w-40 h-40 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -628,8 +619,65 @@ function App() {
             <div className="p-4 flex justify-between items-center"><span className="text-xs font-bold text-slate-500 uppercase tracking-widest">State Region</span><span className="text-sm font-black text-slate-300">{profileData.state || "Not Provided"}</span></div>
             <div className="p-4 flex justify-between items-center"><span className="text-xs font-bold text-slate-500 uppercase tracking-widest">District</span><span className="text-sm font-black text-slate-300">{profileData.district || "Not Provided"}</span></div>
           </div>
+
+          {/* 🚀 NEW: ACTION BUTTONS SECTION (History & Logout) */}
+          <div className="mt-8 space-y-3 pt-4 border-t border-slate-800">
+            <button 
+              onClick={() => fetchHistory()}
+              className="w-full bg-slate-900 border border-slate-700 hover:border-yellow-500 text-slate-300 flex items-center justify-between px-5 py-4 rounded-2xl transition-all active:scale-95 shadow-lg"
+            >
+              <div className="flex items-center gap-3">
+                <Receipt className="text-yellow-500" size={20} />
+                <span className="font-bold text-sm tracking-wide">Transaction History</span>
+              </div>
+              <span className="text-slate-500 text-xs font-bold tracking-widest uppercase">View Ledger &rarr;</span>
+            </button>
+
+            <button 
+              onClick={handleLogout}
+              className="w-full bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 text-red-500 flex items-center justify-center gap-2 px-5 py-4 rounded-2xl transition-all active:scale-95 shadow-lg"
+            >
+              <LogOut size={20} />
+              <span className="font-black text-sm tracking-widest uppercase">Sign Out</span>
+            </button>
+          </div>
         </div>
       )}
+
+      {/* 🚀 NATIVE APP BOTTOM NAVIGATION */}
+      <div className="fixed bottom-0 left-0 w-full bg-slate-950/90 backdrop-blur-xl border-t border-slate-800/80 shadow-[0_-10px_30px_rgba(0,0,0,0.6)] z-50">
+        <div className="flex justify-around items-center h-16 px-2 max-w-xl mx-auto">
+          
+          {/* Home Tab */}
+          <button 
+            onClick={() => setCurrentView("lobby")} 
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${currentView === "lobby" ? 'text-blue-500' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            <Swords size={20} className={currentView === "lobby" ? "drop-shadow-[0_0_8px_rgba(59,130,246,0.8)]" : ""} />
+            <span className="text-[9px] font-black uppercase tracking-widest">Arena</span>
+          </button>
+
+          {/* Wallet / History Tab */}
+          <button 
+            onClick={() => fetchHistory()} 
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${currentView === "history" ? 'text-yellow-500' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            <Wallet size={20} className={currentView === "history" ? "drop-shadow-[0_0_8px_rgba(234,179,8,0.8)]" : ""} />
+            <span className="text-[9px] font-black uppercase tracking-widest">Wallet</span>
+          </button>
+
+          {/* Profile Tab */}
+          <button 
+            onClick={() => setCurrentView("profile")} 
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${currentView === "profile" ? 'text-emerald-500' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            <User size={20} className={currentView === "profile" ? "drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]" : ""} />
+            <span className="text-[9px] font-black uppercase tracking-widest">Profile</span>
+          </button>
+
+        </div>
+      </div>
+
     </div>
   );
 }
