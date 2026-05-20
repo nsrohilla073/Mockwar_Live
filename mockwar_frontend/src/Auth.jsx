@@ -4,7 +4,7 @@ import { auth, googleProvider } from './firebase';
 import { signInWithPopup, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 import axios from 'axios';
 import { Smartphone, Mail, ShieldCheck, User, MapPin, CalendarDays, Zap, Camera, Check, Gift } from 'lucide-react'; // 🔥 NEW: Gift icon
-const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+const API_BASE = "https://mockwar-backend.onrender.com";
 // 🗺️ All India States & Top Districts
 const INDIA_STATES = {
   "Andaman and Nicobar Islands": ["Nicobar", "North and Middle Andaman", "South Andaman"],
@@ -154,7 +154,7 @@ function Auth() {
 
   const verifyTokenWithDjango = async (idToken) => {
     try {
-      const response = await axios.post('http://127.0.0.1:8000/api/auth/firebase-login/', { id_token: idToken });
+      const response = await axios.post(`${API_BASE}/api/auth/firebase-login/`, { id_token: idToken });
       if (response.data.is_new_user) {
         setIsNewUser(true);
         setRegData({ ...regData, uid: response.data.uid, phone: response.data.phone || phone, email: response.data.email || '' });
@@ -177,7 +177,7 @@ function Auth() {
     setLoading(true);
     try {
       // 🔥 Send the registration data (including referred_by) to Django
-      const response = await axios.post('http://127.0.0.1:8000/api/auth/register/', regData);
+      const response = await axios.post(`${API_BASE}/api/auth/register/`, regData);
       localStorage.setItem('access_token', response.data.access);
       localStorage.setItem('refresh_token', response.data.refresh);
       alert(`Account Created! Your Gamer Tag is: ${response.data.username}`);

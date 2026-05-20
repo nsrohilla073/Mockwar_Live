@@ -1,5 +1,5 @@
-const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-const WS_BASE = import.meta.env.VITE_WS_URL || "ws://127.0.0.1:8000";
+const API_BASE = "https://mockwar-backend.onrender.com";
+const WS_BASE = "wss://mockwar-backend.onrender.com";
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Clock, Trophy, User, Award, Swords, Crosshair, Zap, Users, Loader2, CheckCircle2, XCircle, Volume2, VolumeX } from "lucide-react";

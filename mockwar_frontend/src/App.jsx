@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+const API_BASE = "https://mockwar-backend.onrender.com";
 
 function App() {
   const navigate = useNavigate();
@@ -121,7 +121,7 @@ function App() {
   const handleClaimBonus = async () => {
     setIsClaiming(true);
     try {
-      const response = await axios.post("http://127.0.0.1:8000/api/payment/claim-bonus/", {}, { headers: { Authorization: `Bearer ${token}` } });
+      const response = await axios.post(`${API_BASE}/api/payment/claim-bonus/`, {}, { headers: { Authorization: `Bearer ${token}` } });
       await fetchDashboardData();
       showAppAlert("Bonus Claimed!", response.data.message || "₹5 Bonus Cash added to your wallet!", "success");
     } catch (error) {
@@ -136,7 +136,7 @@ function App() {
     setLeaderboardCategory(slug);
     setLeaderboardLoading(true);
     try {
-      const res = await axios.get(`http://127.0.0.1:8000/api/game/leaderboard/${slug}/`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await axios.get(`${API_BASE}/api/game/leaderboard/${slug}/`, { headers: { Authorization: `Bearer ${token}` } });
       setLeaderboardData(res.data.leaderboard || []);
     } catch (error) {
       console.error("Failed to fetch leaderboard", error);
@@ -157,7 +157,7 @@ function App() {
     setIsLoadingHistory(true);
     setCurrentView("history");
     try {
-      const res = await axios.get("http://127.0.0.1:8000/api/user/dashboard-history/", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await axios.get(`${API_BASE}/api/user/dashboard-history/`, { headers: { Authorization: `Bearer ${token}` } });
       setHistoryData(res.data);
     } catch (error) {
       showAppAlert("Error", "Could not load history.", "error");
@@ -169,7 +169,7 @@ function App() {
 
   const fetchProfile = async () => {
     try {
-      const res = await axios.get("http://127.0.0.1:8000/api/user/profile/", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await axios.get(`${API_BASE}/api/user/profile/`, { headers: { Authorization: `Bearer ${token}` } });
       setProfileData(res.data);
     } catch (error) {
       showAppAlert("Error", "Could not load profile.", "error");
@@ -183,13 +183,13 @@ function App() {
     if (!amountInput || isNaN(amountInput) || amountInput <= 0) return showAppAlert("Invalid Amount", "Please enter a valid amount.", "error");
     setDepositModal(false);
     try {
-      const response = await axios.post("http://127.0.0.1:8000/api/payment/create-order/", { amount: amountInput }, { headers: { Authorization: `Bearer ${token}` } });
+      const response = await axios.post(`${API_BASE}/api/payment/create-order/`, { amount: amountInput }, { headers: { Authorization: `Bearer ${token}` } });
       const { order_id, key_id } = response.data;
       const options = {
         key: key_id, amount: amountInput * 100, currency: "INR", name: "MockWar Gaming", description: "Add cash to wallet", order_id: order_id,
         handler: async function (response) {
           try {
-            await axios.post("http://127.0.0.1:8000/api/payment/verify/", {
+            await axios.post(`${API_BASE}/api/payment/verify/`, {
               razorpay_payment_id: response.razorpay_payment_id, razorpay_order_id: response.razorpay_order_id, razorpay_signature: response.razorpay_signature,
             }, { headers: { Authorization: `Bearer ${token}` } });
             fetchDashboardData(); showAppAlert("Success!", `₹${amountInput} successfully added to your wallet.`, "success");
@@ -207,7 +207,7 @@ function App() {
     if (!upiInput) return showAppAlert("Missing Info", "Please enter your valid UPI ID.", "error");
     try {
       setWithdrawModal(false);
-      await axios.post("http://127.0.0.1:8000/api/payment/withdraw/", { amount: amountInput, upi_id: upiInput }, { headers: { Authorization: `Bearer ${token}` } });
+      await axios.post(`${API_BASE}/api/payment/withdraw/`, { amount: amountInput, upi_id: upiInput }, { headers: { Authorization: `Bearer ${token}` } });
       showAppAlert("Request Placed!", "Withdrawal is PENDING. Admin will process it shortly.", "success");
       fetchDashboardData(); setAmountInput(""); setUpiInput("");
     } catch (error) { setWithdrawModal(false); showAppAlert("Withdrawal Failed", error.response?.data?.error || "Server error occurred.", "error"); }
@@ -216,7 +216,7 @@ function App() {
   const handlePlayGame = async (entryFee, gameId) => {
     if (walletBalance >= entryFee) {
       try {
-        const response = await axios.post("http://127.0.0.1:8000/api/game/play/", { entry_fee: entryFee }, { headers: { Authorization: `Bearer ${token}` } });
+        const response = await axios.post(`${API_BASE}/api/game/play/`, { entry_fee: entryFee }, { headers: { Authorization: `Bearer ${token}` } });
         if (response.data.success) { navigate(`/arena/${gameId}`); }
       } catch (error) { showAppAlert("Error", "Couldn't secure entry fee. Try again.", "error"); }
     } else {
