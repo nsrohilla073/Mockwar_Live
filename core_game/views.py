@@ -454,7 +454,7 @@ class GetGameContentAPIView(APIView):
             q_time = table.time_per_question if table else 12
             is_typing = 'typing' in category_slug.lower()
 
-            cache_key = f"live_match_content_{category_slug}"
+            cache_key = f"live_match_{category_slug}_{table.id if table else 'default'}"
             cached_game_data = cache.get(cache_key)
 
             if cached_game_data:
