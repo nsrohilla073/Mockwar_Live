@@ -244,26 +244,29 @@ class PlayGameAPIView(APIView):
         entry_fee_str = str(request.data.get('entry_fee', 0))
         entry_fee = Decimal(entry_fee_str)
         try:
-            wallet = Wallet.objects.get(user=request.user)
-            if wallet.total_balance() >= entry_fee:
-                if wallet.deposit_balance >= entry_fee:
-                    wallet.deposit_balance -= entry_fee
-                else:
-                    remaining = entry_fee - wallet.deposit_balance
-                    wallet.deposit_balance = Decimal('0.00')
-                    wallet.winning_balance -= remaining
-                wallet.save()
+            # 🔴 NAYA: select_for_update() aur atomic() lagaya gaya hai
+            with transaction.atomic():
+                # select_for_update() DB ki is row ko lock kar dega jab tak transaction poora na ho
+                wallet = Wallet.objects.select_for_update().get(user=request.user)
                 
-                Transaction.objects.create(
-                    user=request.user, amount=entry_fee, 
-                    tx_type='GAME_ENTRY', status='SUCCESS'
-                )
-                return Response({"success": True, "message": "Entry fee deducted"}, status=status.HTTP_200_OK)
-            else:
-                return Response({"error": "Insufficient balance"}, status=status.HTTP_400_BAD_REQUEST)
+                if wallet.total_balance() >= entry_fee:
+                    if wallet.deposit_balance >= entry_fee:
+                        wallet.deposit_balance -= entry_fee
+                    else:
+                        remaining = entry_fee - wallet.deposit_balance
+                        wallet.deposit_balance = Decimal('0.00')
+                        wallet.winning_balance -= remaining
+                    wallet.save()
+                    
+                    Transaction.objects.create(
+                        user=request.user, amount=entry_fee, 
+                        tx_type='GAME_ENTRY', status='SUCCESS'
+                    )
+                    return Response({"success": True, "message": "Entry fee deducted"}, status=status.HTTP_200_OK)
+                else:
+                    return Response({"error": "Insufficient balance"}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 # ==========================================
 # 3. FIREBASE AUTH API (AUTO-LINKING)
@@ -618,7 +621,15 @@ class SubmitGameResultAPIView(APIView):
             prize_won = Decimal('0.00')
             tx_type = None
 
+                        # 🔴 NAYA: Yahan bhi Wallet lock lagaya
             with transaction.atomic():
+                wallet = Wallet.objects.select_for_update().get(user=user)
+                
+                # Check karo ki kahin isne pehle hi toh submit nahi kar diya? (Double submit prevention)
+                already_submitted = MatchHistory.objects.filter(user=user, table=table, played_at__gte=timezone.now() - timezone.timedelta(minutes=1)).exists()
+                if already_submitted:
+                    return Response({"error": "Result already submitted"}, status=status.HTTP_400_BAD_REQUEST)
+
                 if status_result == 'WIN':
                     prize_won = Decimal(str(table.prize_pool))
                     wallet.winning_balance += prize_won
@@ -644,7 +655,6 @@ class SubmitGameResultAPIView(APIView):
             return Response({"prize_won": prize_won, "match_status": status_result}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 # ==========================================
 # 8. LIVE LEADERBOARD API

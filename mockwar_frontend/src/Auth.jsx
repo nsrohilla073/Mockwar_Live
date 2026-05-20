@@ -322,15 +322,18 @@ function Auth() {
               <div className="space-y-4 animate-fade-in">
                 {!otpSent ? (
                   <>
-                    <div className="flex gap-2">
-                      <div className="bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3.5 text-slate-500 font-black flex items-center">+91</div>
-                      <input type="tel" maxLength="10" placeholder="Mobile Number" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
-                        className="flex-1 bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3.5 text-white focus:border-blue-500 outline-none tracking-widest transition-colors font-bold" />
-                    </div>
-                    <button onClick={sendOTP} disabled={loading} className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black text-sm uppercase tracking-widest py-4 rounded-xl shadow-[0_0_20px_rgba(59,130,246,0.3)] transition-all active:scale-95 disabled:opacity-50">
-                      {loading ? "CONNECTING..." : "SECURE OTP LOGIN"}
+                  <div className="flex justify-between items-end mb-2 px-1">
+                    <p className="text-xs text-slate-400 font-bold">Sent to +91 {phone}</p>
+                    <button onClick={() => setOtpSent(false)} className="text-[10px] text-blue-400 font-black uppercase tracking-widest hover:text-blue-300 underline">
+                      Edit Number
                     </button>
-                  </>
+                  </div>
+                  <input type="text" maxLength="6" placeholder="------" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                    className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-4 text-white focus:border-emerald-500 outline-none tracking-[1em] text-center text-3xl font-black transition-colors" />
+                  <button onClick={verifyOTP} disabled={loading} className="mt-4 w-full bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-white font-black text-sm uppercase tracking-widest py-4 rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all active:scale-95 disabled:opacity-50">
+                    {loading ? "VERIFYING..." : "CONFIRM & ENTER"}
+                  </button>
+                </>
                 ) : (
                   <>
                     <input type="text" maxLength="6" placeholder="------" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}

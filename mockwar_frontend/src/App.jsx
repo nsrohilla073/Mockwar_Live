@@ -185,7 +185,7 @@ function App() {
       const response = await axios.post(`${API_BASE}/api/payment/create-order/`, { amount: amountInput }, { headers: { Authorization: `Bearer ${token}` } });
       const { order_id, key_id } = response.data;
       const options = {
-        key: key_id, amount: amountInput * 100, currency: "INR", name: "MockWar Gaming", description: "Add cash to wallet", order_id: order_id,
+        key: key_id, amount: Math.round(parseFloat(amountInput) * 100), currency: "INR", name: "MockWar Gaming", description: "Add cash to wallet", order_id: order_id,
         handler: async function (response) {
           try {
             await axios.post(`${API_BASE}/api/payment/verify/`, {
@@ -213,16 +213,17 @@ function App() {
   };
   
   const handlePlayGame = async (entryFee, gameId) => {
-    if (isJoining) return; // 🔒 डबल क्लिक लॉक
+    if (isJoining) return; 
     
     if (walletBalance >= entryFee) {
-      setIsJoining(true); // ताला बंद
+      setIsJoining(true); 
       try {
         const response = await axios.post(`${API_BASE}/api/game/play/`, { entry_fee: entryFee }, { headers: { Authorization: `Bearer ${token}` } });
         if (response.data.success) { navigate(`/arena/${gameId}`); }
       } catch (error) { 
         showAppAlert("Error", "Couldn't secure entry fee. Try again.", "error"); 
-        setIsJoining(false); // ताला खोल दो
+      } finally {
+        setIsJoining(false); // 🔴 YAHAN LOCK KHOL DO
       }
     } else {
       showAppAlert("Low Balance", `You need ₹${entryFee} to play. Please Add Cash.`, "error");
