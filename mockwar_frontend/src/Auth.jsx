@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom'; // 🔥 NEW: useSearchParams
 import { auth, googleProvider } from './firebase';
 import { signInWithPopup, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
@@ -108,8 +108,13 @@ function Auth() {
     }
     setIsCameraOpen(false);
   };
+  useEffect(() => {
+    if (isCameraOpen && videoRef.current && mediaStream) {
+      videoRef.current.srcObject = mediaStream;
+    }
+  }, [isCameraOpen, mediaStream]);
   // ---------------------------
-
+ 
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
