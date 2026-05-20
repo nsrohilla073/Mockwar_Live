@@ -2,7 +2,7 @@ const API_BASE = "https://mockwar-backend.onrender.com";
 const WS_BASE = "wss://mockwar-backend.onrender.com";
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Clock, Trophy, User, Award, Swords, Crosshair, Zap, Users, Loader2, CheckCircle2, XCircle, Volume2, VolumeX } from "lucide-react";
+import { Clock, Trophy, User, Award, Swords, Crosshair, Zap, Users, Loader2, Volume2, VolumeX } from "lucide-react";
 import axios from "axios";
 
 function Arena() {
@@ -18,7 +18,7 @@ function Arena() {
   const playSound = (soundFile) => {
     if (soundEnabled) {
       const audio = new Audio(`/sounds/${soundFile}`);
-      audio.volume = 0.5; // वॉल्यूम 50% रखा है
+      audio.volume = 0.5;
       audio.play().catch(e => console.log("Sound play error:", e));
     }
   };
@@ -68,8 +68,13 @@ function Arena() {
   const [targetParagraph, setTargetParagraph] = useState("");
   const [typedText, setTypedText] = useState("");
   const [wpm, setWpm] = useState(0);
+  const wpmRef = useRef(0);
   const [accuracy, setAccuracy] = useState(100);
+  const accuracyRef = useRef(100);
   const typingStartTime = useRef(null);
+
+  useEffect(() => { wpmRef.current = wpm; }, [wpm]);
+  useEffect(() => { accuracyRef.current = accuracy; }, [accuracy]);
   
   const sendMyScore = (newScore) => {
       if (ws.current && ws.current.readyState === WebSocket.OPEN) {
@@ -122,7 +127,6 @@ function Arena() {
 
             if (data.action === 'score_update' && data.player && data.player !== myTag && data.player !== "Live_Player") {
                 let isNewPlayer = false;
-
                 updateOpponents(prev => {
                     const existing = prev.find(o => o.name === data.player);
                     if (existing) {
@@ -140,6 +144,16 @@ function Arena() {
                     setSearchTime(60); 
                     setTimeout(() => sendMyScore(myPointsRef.current), 500); 
                 }
+            }
+
+            // 🚨 JUDGE SYSTEM: Waiting for opponent
+            if (data.action === 'waiting_for_opponent') {
+                setGameState("waiting_result");
+            }
+
+            // 🚨 JUDGE SYSTEM: Final Result is here!
+            if (data.action === 'match_result') {
+                handleMatchResult(data);
             }
         };
 
@@ -212,7 +226,7 @@ function Arena() {
 
   const triggerMatchFound = () => {
       setGameState("found");
-      playSound('match-found.mp3'); // 🔊 मैच फाउंड साउंड
+      playSound('match-found.mp3');
       setTimeout(() => {
           setGameState("playing");
           typingStartTime.current = Date.now();
@@ -226,7 +240,6 @@ function Arena() {
       const timer = setTimeout(() => {
         setTimeLeft(timeLeft - 1);
         
-        // 🔊 आखिरी 5 सेकंड में टिक-टिक साउंड
         if (timeLeft <= 5 && timeLeft > 0) {
             playSound('tick.mp3');
         }
@@ -260,10 +273,10 @@ function Arena() {
       }, 1000);
       return () => clearTimeout(timer);
     } else {
-      if (!isTypingMode) handleNextQuestion(myPoints, null); 
-      else triggerAutoSubmit(myPoints); 
+      if (!isTypingMode) handleNextQuestion(myPointsRef.current, null); 
+      else triggerRefereeSubmit(myPointsRef.current); 
     }
-  }, [gameState, timeLeft, isTypingMode, myPoints]);
+  }, [gameState, timeLeft, isTypingMode]);
 
   const handleAnswerClick = (selectedOption) => {
     const currentQ = questions[currentQIndex];
@@ -273,7 +286,6 @@ function Arena() {
 
     const isCorrect = selectedLetter === dbAnswer;
     
-    // 🔊 सही या गलत जवाब का साउंड
     if (isCorrect) playSound('correct.mp3');
     else playSound('wrong.mp3');
 
@@ -295,7 +307,7 @@ function Arena() {
 
   const handleNextQuestion = (finalMyPoints, selectedOption) => {
     if (!selectedOption) {
-        playSound('wrong.mp3'); // टाइमआउट पर भी गलत वाला साउंड
+        playSound('wrong.mp3'); 
         const currentQ = questions[currentQIndex];
         setUserAnswers(prev => [...prev, { 
             question: currentQ.question, 
@@ -309,7 +321,7 @@ function Arena() {
       setCurrentQIndex(currentQIndex + 1);
       setTimeLeft(timePerQ); 
     } else {
-      triggerAutoSubmit(finalMyPoints); 
+      triggerRefereeSubmit(finalMyPoints); 
     }
   };
 
@@ -321,7 +333,6 @@ function Arena() {
     const currentWpm = value.length > 0 ? Math.round(words / (timeElapsedMins || 0.01)) : 0;
     setWpm(currentWpm);
 
-    // 🔥 PURE LOGIC: सिर्फ लेटर्स और नंबर्स को चेक करेगा, स्पेस को इग्नोर करेगा
     const cleanTarget = targetParagraph.replace(/[^a-zA-Z0-9]/g, '');
     const cleanTyped = value.replace(/[^a-zA-Z0-9]/g, '');
 
@@ -336,78 +347,97 @@ function Arena() {
     setMyPoints(currentPoints);
     sendMyScore(currentPoints); 
 
-    // ऑटो-सबमिट (स्पेस हटाकर मैच हो गया तो)
     if (cleanTyped === cleanTarget && cleanTarget.length > 0) {
-      triggerAutoSubmit(currentPoints);
+      triggerRefereeSubmit(currentPoints);
     }
   };
 
-  const handleKeyDown = (e) => {
-      // Typing sound could be added here if needed, but skipped to avoid noise clutter
-  };
-  const handlePaste = (e) => {
-    e.preventDefault();
-  };
+  const handlePaste = (e) => { e.preventDefault(); };
 
-  // 4. CALCULATE MATCH WINNER 
-  const triggerAutoSubmit = async (finalMyPts) => {
+  // 4. 🚨 SEND SCORE TO REFEREE (WebSocket) - NO API HIT YET!
+  const triggerRefereeSubmit = (finalMyPts) => {
     if (hasSubmitted.current) return;
     hasSubmitted.current = true; 
 
-    setGameState("finished");
-    setApiLoading(true);
+    setGameState("waiting_result"); // UI Change to Loading
 
-    const allScores = [finalMyPts, ...opponentsRef.current.map(o => o.score)];
-    const highestScore = Math.max(...allScores);
-    const highestScoreCount = allScores.filter(s => s === highestScore).length;
-    const isTie = highestScoreCount > 1;
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+        // Send MY final score to Referee
+        ws.current.send(JSON.stringify({
+            action: 'game_finished',
+            player_name: myGamerTagRef.current,
+            score: finalMyPts,
+            wpm: wpmRef.current
+        }));
 
-    let matchStatus = 'LOSS';
-    if (finalMyPts === highestScore) {
-        matchStatus = isTie ? 'DRAW' : 'WIN';
+        // 🤖 BOT FIX: If there are frontend bots, send their scores to referee immediately so game ends!
+        opponentsRef.current.forEach(opp => {
+            if (opp.isBot) {
+                ws.current.send(JSON.stringify({
+                    action: 'game_finished',
+                    player_name: opp.name,
+                    score: opp.score,
+                    wpm: 0
+                }));
+            }
+        });
     }
+  };
 
-    // 🔊 जीत या हार का साउंड ट्रिगर
-    if (matchStatus === 'WIN') playSound('win.mp3');
-    else playSound('lose.mp3'); // ड्रॉ या हार में सैड साउंड
+  // 5. 🏆 FINALLY: REFEREE SENDS RESULT -> WE HIT API
+  const handleMatchResult = async (data) => {
+      setGameState("finished");
+      setApiLoading(true);
 
-    const finalStandings = [
-        { name: myGamerTagRef.current, score: finalMyPts, isMe: true },
-        ...opponentsRef.current.map(o => ({ name: o.name, score: o.score, isMe: false }))
-    ].sort((a, b) => b.score - a.score);
+      const myTag = myGamerTagRef.current;
+      let matchStatus = 'LOSS';
 
-    let currentRank = 1;
-    finalStandings.forEach((p, idx) => {
-        if (idx > 0 && p.score < finalStandings[idx-1].score) currentRank = idx + 1;
-        p.rank = currentRank;
-    });
-    setMatchStandings(finalStandings);
+      if (data.is_draw) {
+          matchStatus = 'DRAW';
+      } else if (data.winners.includes(myTag)) {
+          matchStatus = 'WIN';
+      }
 
-    try {
-      const res = await axios.post(`${API_BASE}/api/game/submit-result/`, { 
-        table_id: tableId,
-        score: finalMyPts,
-        wpm: wpm,
-        accuracy: accuracy,
-        status: matchStatus
-      }, { headers: { Authorization: `Bearer ${token}` } });
+      if (matchStatus === 'WIN') playSound('win.mp3');
+      else playSound('lose.mp3'); 
 
-      setMatchReward(res.data.prize_won || 0); 
-    } catch (error) {
-      console.error("Submission Error:", error);
-    } finally {
-      setApiLoading(false);
-    }
+      // Format Standings from Referee Data
+      const finalStandings = Object.entries(data.final_scores).map(([name, stats]) => ({
+          name,
+          score: stats.score,
+          isMe: name === myTag
+      })).sort((a, b) => b.score - a.score);
+
+      let currentRank = 1;
+      finalStandings.forEach((p, idx) => {
+          if (idx > 0 && p.score < finalStandings[idx-1].score) currentRank = idx + 1;
+          p.rank = currentRank;
+      });
+      setMatchStandings(finalStandings);
+
+      // 💰 Hit Submit API only after result is declared!
+      try {
+          const res = await axios.post(`${API_BASE}/api/game/submit-result/`, { 
+              table_id: tableId,
+              score: data.final_scores[myTag].score,
+              wpm: data.final_scores[myTag].wpm,
+              accuracy: accuracyRef.current,
+              status: matchStatus
+          }, { headers: { Authorization: `Bearer ${token}` } });
+
+          setMatchReward(res.data.prize_won || 0); 
+      } catch (error) {
+          console.error("Submission Error:", error);
+      } finally {
+          setApiLoading(false);
+      }
   };
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-100 font-sans p-4 relative overflow-hidden select-none pb-20">
       
       {/* 🔊 SOUND TOGGLE BUTTON */}
-      <button 
-        onClick={() => setSoundEnabled(!soundEnabled)}
-        className="absolute top-4 right-4 z-50 bg-slate-900 border border-slate-700 p-2 rounded-full text-slate-400 hover:text-blue-400 transition-colors"
-      >
+      <button onClick={() => setSoundEnabled(!soundEnabled)} className="absolute top-4 right-4 z-50 bg-slate-900 border border-slate-700 p-2 rounded-full text-slate-400 hover:text-blue-400 transition-colors">
         {soundEnabled ? <Volume2 size={20} /> : <VolumeX size={20} className="text-red-400" />}
       </button>
 
@@ -417,6 +447,7 @@ function Arena() {
       {/* 🔍 THE WAITING ROOM */}
       {gameState === "searching" && (
         <div className="flex flex-col items-center space-y-8 animate-fade-in z-10 w-full max-w-sm">
+          {/* ... (Existing code kept unchanged) */}
           <div className="text-center">
             <h1 className="text-2xl font-black tracking-widest text-slate-200 uppercase bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">Securing Arena</h1>
             <p className="text-xs text-blue-400 font-bold uppercase tracking-widest mt-1.5 flex items-center justify-center gap-1.5">
@@ -479,6 +510,7 @@ function Arena() {
       {/* 🎮 LIVE GAME PLAYING */}
       {gameState === "playing" && (
         <div className="w-full max-w-xl animate-fade-in space-y-5 z-10">
+          {/* ... (Existing Playing code kept unchanged) */}
           <div className="space-y-3 bg-slate-900/80 backdrop-blur-md border border-slate-800 p-4 rounded-3xl shadow-[0_0_30px_rgba(0,0,0,0.5)]">
               <div className="flex justify-center -mt-8 mb-2">
                  <div className="bg-slate-950 px-6 py-2 rounded-2xl border border-yellow-500/30 flex items-center gap-2 shadow-[0_10px_20px_rgba(0,0,0,0.4)] relative overflow-hidden">
@@ -547,7 +579,6 @@ function Arena() {
               <textarea
                 value={typedText}
                 onChange={handleTypingChange}
-                onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
                 onCopy={(e) => e.preventDefault()}
                 autoComplete="off"
@@ -560,9 +591,19 @@ function Arena() {
         </div>
       )}
 
+      {/* ⏳ NEW: WAITING FOR OPPONENT SCREEN */}
+      {gameState === "waiting_result" && (
+        <div className="flex flex-col items-center justify-center space-y-6 animate-fade-in z-10 w-full max-w-sm text-center">
+            <Loader2 size={60} className="animate-spin text-blue-500 mb-4" />
+            <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500 uppercase tracking-widest">Awaiting Referee</h1>
+            <p className="text-sm font-bold text-slate-400 uppercase tracking-widest bg-slate-900/50 border border-slate-800 py-2 px-4 rounded-xl">Waiting for opponent to finish...</p>
+        </div>
+      )}
+
       {/* 🏆 LEADERBOARD & TRANSPARENCY SCREEN */}
       {gameState === "finished" && (
         <div className="w-full max-w-md space-y-6 z-10 animate-scale-up">
+          {/* ... (Existing Result Screen kept unchanged) */}
           <div className="bg-slate-900/90 backdrop-blur-xl p-6 rounded-[2rem] border border-slate-700 text-center shadow-[0_0_50px_rgba(0,0,0,0.5)]">
              <Trophy size={60} className={`${matchReward > 0 && myPoints > 0 ? "text-emerald-400 drop-shadow-[0_0_20px_rgba(52,211,153,0.4)]" : "text-red-400 drop-shadow-[0_0_20px_rgba(248,113,113,0.4)]"} mb-3`} />
              <h1 className={`text-3xl font-black tracking-tight mb-4 uppercase ${matchReward > 0 ? "text-emerald-400" : matchStandings[0]?.score === myPoints ? "text-yellow-400" : "text-red-500"}`}>
@@ -629,7 +670,6 @@ function Arena() {
              </button>
           </div>
 
-          {/* 🔥 ACCURACY REVIEW CARD (ANSWER KEY WITH HINDI) */}
           {!isTypingMode && userAnswers.length > 0 && (
               <div className="w-full bg-slate-900 border border-slate-800 rounded-[2rem] p-6 space-y-4 shadow-2xl animate-fade-in">
                   <h3 className="text-center text-xs font-black uppercase text-slate-400 tracking-widest flex items-center justify-center gap-1.5"><Crosshair size={14}/> Quiz Accuracy Review</h3>

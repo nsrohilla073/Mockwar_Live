@@ -28,7 +28,7 @@ urlpatterns = [
     path('payment/verify/', VerifyPaymentAPIView.as_view(), name='verify_payment'),
     path('payment/wallet-balance/', GetWalletBalanceAPIView.as_view(), name='wallet_balance'),
     path('payment/withdraw/', WithdrawRequestAPIView.as_view(), name='withdraw'),
-    path('api/payment/claim-bonus/', ClaimBonusAPIView.as_view(), name='claim_daily_bonus'),
+    path('payment/claim-bonus/', ClaimBonusAPIView.as_view(), name='claim_daily_bonus'),
     # 🔐 Auth URLs
     path('auth/firebase-login/', FirebaseLoginAPIView.as_view(), name='firebase_login'),
     path('auth/complete-registration/', CompleteRegistrationAPIView.as_view(), name='complete_registration'),
