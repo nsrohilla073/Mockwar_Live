@@ -367,8 +367,7 @@ class CompleteRegistrationAPIView(APIView):
                     mobile_number=phone, dob=dob, state=state, district=district, live_photo=live_photo
                 )
                 
-                new_wallet = Wallet.objects.create(user=new_user)
-
+                new_wallet, _ = Wallet.objects.get_or_create(user=new_user)
                 if referred_by_code:
                     actual_tag = referred_by_code.replace("WIN", "")
                     referrer_profile = UserProfile.objects.filter(gamer_tag=actual_tag).first()
