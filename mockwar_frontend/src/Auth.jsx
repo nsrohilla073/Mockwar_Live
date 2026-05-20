@@ -184,7 +184,7 @@ function Auth() {
       navigate('/'); 
     } catch (error) {
       alert("Registration failed. Please try again.");
-    } finally { 
+    } finally {
       setLoading(false);
     }
   };
