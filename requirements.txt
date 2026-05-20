@@ -16,3 +16,4 @@ requests>=2.31.0
 ujson>=5.9.0
 pydantic>=2.5.0
 gunicorn>=21.2.0
+Pillow>=10.2.0
