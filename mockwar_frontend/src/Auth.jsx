@@ -177,7 +177,7 @@ function Auth() {
     setLoading(true);
     try {
       // 🔥 Send the registration data (including referred_by) to Django
-      const response = await axios.post(`${API_BASE}/api/auth/register/`, regData);
+      const response = await axios.post(`${API_BASE}/api/auth/complete-registration/`, regData);
       localStorage.setItem('access_token', response.data.access);
       localStorage.setItem('refresh_token', response.data.refresh);
       alert(`Account Created! Your Gamer Tag is: ${response.data.username}`);
