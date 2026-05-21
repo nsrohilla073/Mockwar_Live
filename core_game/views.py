@@ -457,34 +457,58 @@ class GetGameContentAPIView(APIView):
             q_time = table.time_per_question if table else 12
             is_typing = 'typing' in category_slug.lower()
 
-            cache_key = f"live_match_{category_slug}_{table.id if table else 'default'}"
-            lock_key = f"{cache_key}_lock"
+            # ==========================================
+            # 1. MATCHMAKING FIRST (CHECK QUEUE)
+            # ==========================================
+            match_queue_key = f"match_queue_{category_slug}"
+            queue_data = cache.get(match_queue_key)
             
-            game_data = None
-            cached_game_data = cache.get(cache_key)
-
-            if cached_game_data:
-                print("⚡ Serving Match Content from Cache (0 Lag!)")
-                game_data = cached_game_data
-            else:
-                # 🔐 RACE CONDITION FIX: Ek time par ek hi Gemini Call hogi
-                lock_acquired = cache.add(lock_key, "locked", timeout=30)
+            if queue_data:
+                # 🎮 PLAYER 2+ AAYA: Jo room pehle bana hai, usme ghusao
+                room_id = queue_data['room_id']
+                queue_data['player_count'] += 1
                 
+                if queue_data['player_count'] >= max_players:
+                    cache.delete(match_queue_key)  # Room Full
+                else:
+                    cache.set(match_queue_key, queue_data, timeout=65)
+                
+                # 🔥 SABSE BADA FIX: Player 2 ko wahi sawal do jo is Room ke liye P1 ne banaye the
+                room_content_key = f"content_{room_id}"
+                game_data = cache.get(room_content_key)
+                
+                # Agar kisi wajah se room cache clear ho jaye (rare case) toh fallback do
+                if not game_data:
+                    game_data = {"is_typing_test": False, "questions": [{"id": 1, "question": "Are you ready? / क्या आप तैयार हैं?", "options": ["Yes", "No", "Maybe", "Okay"], "answer": "A"}], "time_per_question": q_time, "max_players": max_players}
+                    if is_typing: game_data = {"is_typing_test": True, "paragraph": "The match is starting now. Show your speed.", "time_limit": 60, "max_players": max_players}
+
+                game_data['room_id'] = room_id
+                return Response(game_data, status=status.HTTP_200_OK)
+
+            # ==========================================
+            # 2. PLAYER 1 AAYA (CREATE NEW ROOM & CONTENT)
+            # ==========================================
+            room_id = f"room_{int(time.time())}_{random.randint(1000, 9999)}"
+            room_content_key = f"content_{room_id}"
+            
+            # API bachane ke liye hum questions ko sirf 10 seconds cache me rakhenge.
+            # Taki agar 500 log ek sath aaye toh API 1 baar hit ho, par agla match khelne par Naye Qs aayein.
+            global_cache_key = f"global_content_{category_slug}"
+            global_lock_key = f"{global_cache_key}_lock"
+            
+            game_data = cache.get(global_cache_key)
+            
+            if not game_data:
+                lock_acquired = cache.add(global_lock_key, "locked", timeout=15)
                 if not lock_acquired:
-                    print("⏳ Other player is fetching AI content. Waiting...")
+                    print("⏳ Waiting for other player to fetch AI...")
                     for _ in range(15):
                         time.sleep(1)
-                        cached_data = cache.get(cache_key)
-                        if cached_data:
-                            print("⚡ Serving Match Content to Player 2 from generated Cache!")
-                            game_data = cached_data
-                            break
-                    
-                    if not game_data:
-                        return Response({"error": "AI Timeout"}, status=status.HTTP_504_GATEWAY_TIMEOUT)
+                        game_data = cache.get(global_cache_key)
+                        if game_data: break
                 
                 if not game_data:
-                    print("🤖 Cache is empty. Generating fresh AI Content...")
+                    print("🤖 Generating fresh AI Content...")
                     try:
                         if not hasattr(settings, 'GEMINI_API_KEY') or settings.GEMINI_API_KEY == "YAHAN_APNI_GOOGLE_GEMINI_API_KEY_DAALO":
                             raise Exception("GEMINI_API_KEY missing")
@@ -498,15 +522,13 @@ class GetGameContentAPIView(APIView):
                             elif 'gemini-pro' in name and 'vision' not in name: target_model_name = name
 
                         model = genai.GenerativeModel(target_model_name)
-                        print(f"🎯 Using AI Model: {target_model_name}")
-
+                        
                         if is_typing:
                             topics = ["Space Exploration", "Deep Ocean Secrets", "Cybersecurity", "Ancient Indian History", "Artificial Intelligence"]
                             rnd_topic = random.choice(topics)
                             prompt = f"Generate a highly engaging, unique single paragraph of exactly 40 words about '{rnd_topic}' for an English typing speed test tournament. Do NOT use markdown, quotes, or special symbols. Just plain text."
                             response = model.generate_content(prompt, generation_config=genai.types.GenerationConfig(temperature=0.9))
                             ai_paragraph = response.text.strip().replace('\n', ' ').replace('"', '').replace("'", "")
-                            
                             game_data = {"is_typing_test": True, "paragraph": ai_paragraph, "time_limit": 60, "max_players": max_players}
                         else:
                             clean_topic = table.category.name if table else category_slug.replace('-', ' ').title()
@@ -531,44 +553,23 @@ class GetGameContentAPIView(APIView):
 
                     except Exception as ai_error:
                         print(f"⚠️ AI Quota/Error. Fallback active: {ai_error}")
-                        if is_typing:
-                            game_data = {"is_typing_test": True, "paragraph": "The quick brown fox jumps over the lazy dog.", "time_limit": 60, "max_players": max_players}
-                        else:
-                            game_data = {"is_typing_test": False, "questions": [{"id": 1, "question": "Test? / टेस्ट?", "options": ["A / ए", "B / बी", "C / सी", "D / डी"], "answer": "A"}], "time_per_question": q_time, "max_players": max_players}
+                        if is_typing: game_data = {"is_typing_test": True, "paragraph": "The quick brown fox jumps over the lazy dog.", "time_limit": 60, "max_players": max_players}
+                        else: game_data = {"is_typing_test": False, "questions": [{"id": 1, "question": "Test? / टेस्ट?", "options": ["A", "B", "C", "D"], "answer": "A"}], "time_per_question": q_time, "max_players": max_players}
 
-                    cache.set(cache_key, game_data, timeout=120)
-                    cache.delete(lock_key)  # 🔓 TAALA KHOLO
-                    print("✅ AI Content Generated & Cached successfully!")
+                    # 🔥 Global Cache sirf 10 second ke liye! (API bachane aur nayi generation ke liye)
+                    cache.set(global_cache_key, game_data, timeout=10)
+                    cache.delete(global_lock_key)
+
+            # 🔥 P1 ne jo generate kiya, usko Room Id se jod kar 5 minute ke liye save kar lo.
+            # Taki P2 jab aaye, usko same sawal hi mile!
+            cache.set(room_content_key, game_data, timeout=300)
             
-            # ==========================================
-            # 🎯 DYNAMIC AUTO-MATCHMAKING (For 2, 4, 10 Players)
-            # ==========================================
-            match_queue_key = f"match_queue_{category_slug}"
-            queue_data = cache.get(match_queue_key)
-            
-            if queue_data:
-                # Agar koi kamra pehle se bana hai aur khali hai, toh usme ghuso
-                room_id = queue_data['room_id']
-                queue_data['player_count'] += 1
-                
-                if queue_data['player_count'] >= max_players:
-                    # Agar kamra poora bhar gaya (jaise 4/4 ya 10/10 log ho gaye)
-                    cache.delete(match_queue_key)  # Queue saaf karo, agla player naya room banayega
-                else:
-                    # Kamra abhi poora nahi bhara (jaise 2/4 log aaye hain), update karke wapas save karo
-                    cache.set(match_queue_key, queue_data, timeout=65)
-            else:
-                # Queue khali hai, pehla player aaya hai, naya kamra banao
-                room_id = f"room_{int(time.time())}_{random.randint(100, 999)}"
-                
-                # Agar table multiplayer hai (1 se zyada player), tabhi queue me daalo
-                if max_players > 1:
-                    cache.set(match_queue_key, {"room_id": room_id, "player_count": 1}, timeout=65)
-            
-            # Final output me room_id jod kar frontend ko bhej do
+            # Queue bana do
+            if max_players > 1:
+                cache.set(match_queue_key, {"room_id": room_id, "player_count": 1}, timeout=65)
+
             response_data = game_data.copy()
             response_data['room_id'] = room_id
-
             return Response(response_data, status=status.HTTP_200_OK)
 
         except Exception as e:
