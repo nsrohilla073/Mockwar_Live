@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import {
   Wallet, User, Trophy, Zap, LogOut, History, ArrowLeft, Activity, IndianRupee,
   Shield, ArrowUpRight, AlertCircle, CheckCircle2, X, Users, HelpCircle, Hourglass,
-  Gift, Share2, Copy, Check, Sparkles, Coins, Swords, Award, Crown, Loader2, Receipt
+  Gift, Share2, Copy, Check, Sparkles, Coins, Swords, Award, Crown, Loader2, Receipt, Search
 } from "lucide-react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
@@ -30,6 +30,7 @@ function App() {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isCopied, setIsCopied] = useState(false);
   const [activeCategory, setActiveCategory] = useState("All");
+  const [searchQuery, setSearchQuery] = useState(""); // 🔴 NAYA STATE: Search Bar ke liye
   const [tickerIndex, setTickerIndex] = useState(0);
   const [isClaiming, setIsClaiming] = useState(false);
 
@@ -223,7 +224,7 @@ function App() {
       } catch (error) { 
         showAppAlert("Error", "Couldn't secure entry fee. Try again.", "error"); 
       } finally {
-        setIsJoining(false); // 🔴 YAHAN LOCK KHOL DO
+        setIsJoining(false); 
       }
     } else {
       showAppAlert("Low Balance", `You need ₹${entryFee} to play. Please Add Cash.`, "error");
@@ -446,46 +447,90 @@ function App() {
                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Swipe <ArrowUpRight size={10} className="inline"/></span>
             </div>
 
+            {/* 🔍 Smart Search Bar */}
+            <div className="relative w-full">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <Search size={16} className="text-slate-500" />
+              </div>
+              <input 
+                type="text" 
+                placeholder="Search subjects (e.g. Maths, GK...)" 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-sm font-bold rounded-2xl pl-10 pr-4 py-3 focus:border-blue-500 outline-none shadow-inner transition-all placeholder:text-slate-600"
+              />
+            </div>
+
+            {/* 🎛️ Dynamic Categories Swipe Bar */}
             <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
-                {[
-                  { id: "All", label: "All Games", icon: <Sparkles size={14}/> },
-                  { id: "Quiz", label: "Live Quizzes", icon: <HelpCircle size={14}/> },
-                  { id: "Typing", label: "Typing Battle", icon: <Zap size={14}/> }
-                ].map(cat => (
-                     <button key={cat.id} onClick={() => setActiveCategory(cat.id)} className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest whitespace-nowrap transition-all shadow-md ${activeCategory === cat.id ? "bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]" : "bg-slate-900 text-slate-400 border border-slate-800 hover:bg-slate-800"}`}>
+                {(() => {
+                  const uniqueTopics = [...new Set(liveTables.filter(t => !t.category_name.toLowerCase().includes("typing")).map(t => t.category_name))];
+                  
+                  const filterTabs = [
+                    { id: "All", label: "All Arenas", icon: <Sparkles size={14}/> },
+                    { id: "Typing", label: "Typing Battle", icon: <Zap size={14}/> },
+                    ...uniqueTopics.map(topic => ({ id: topic, label: topic, icon: <HelpCircle size={14}/> }))
+                  ];
+
+                  return filterTabs.map(cat => (
+                     <button 
+                        key={cat.id} 
+                        onClick={() => setActiveCategory(cat.id)} 
+                        className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest whitespace-nowrap transition-all shadow-md ${activeCategory === cat.id ? "bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]" : "bg-slate-900 text-slate-400 border border-slate-800 hover:bg-slate-800"}`}
+                     >
                          {cat.icon} {cat.label}
                      </button>
-                ))}
+                  ));
+                })()}
             </div>
             
+            {/* 🃏 SMART LISTING */}
             <div className="space-y-4 pt-2">
               {liveTables.length === 0 ? (
                 <div className="bg-slate-900/60 p-10 rounded-2xl text-center border border-slate-800 border-dashed"><p className="text-slate-400 font-bold">No Battle Rooms Active</p></div>
               ) : (
-                liveTables.filter(table => activeCategory === "All" || (activeCategory === "Typing" && table.category_name.toLowerCase().includes("typing")) || (activeCategory === "Quiz" && !table.category_name.toLowerCase().includes("typing"))).map((table) => (
-                  <div key={table.id} className="bg-gradient-to-br from-slate-900 via-slate-900/90 to-slate-950 rounded-3xl p-6 border border-slate-800 hover:border-blue-500/40 shadow-2xl transition-all relative overflow-hidden group">
-                    <div className="absolute -inset-px bg-gradient-to-r from-blue-500/0 via-blue-500/10 to-purple-500/0 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
-                    <div className="flex flex-col space-y-5 relative z-10">
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-800/60 pb-3">
-                        <h4 className="text-xl sm:text-2xl font-black tracking-tight text-white uppercase bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">{table.category_name}</h4>
-                        <div className="flex flex-wrap gap-2">
-                          <span className="flex items-center gap-1 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-black uppercase px-2.5 py-1 rounded-md"><Users size={12} /> {table.max_players || 2} Players</span>
-                          <span className="flex items-center gap-1 bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[10px] font-black uppercase px-2.5 py-1 rounded-md"><HelpCircle size={12} /> {table.questions_count || 5} Qs</span>
-                          <span className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-black uppercase px-2.5 py-1 rounded-md"><Hourglass size={12} /> {table.total_time || "60s"}</span>
+                liveTables.filter(table => {
+                  const matchesSearch = table.category_name.toLowerCase().includes(searchQuery.toLowerCase());
+                  if (!matchesSearch) return false;
+
+                  if (activeCategory === "All") return true;
+                  if (activeCategory === "Typing") return table.category_name.toLowerCase().includes("typing");
+                  
+                  return table.category_name === activeCategory;
+                }).length === 0 ? (
+                  <div className="text-center p-6 text-slate-500 font-bold text-sm">No tables found for this subject.</div>
+                ) : (
+                  liveTables.filter(table => {
+                    const matchesSearch = table.category_name.toLowerCase().includes(searchQuery.toLowerCase());
+                    if (!matchesSearch) return false;
+                    if (activeCategory === "All") return true;
+                    if (activeCategory === "Typing") return table.category_name.toLowerCase().includes("typing");
+                    return table.category_name === activeCategory;
+                  }).map((table) => (
+                    <div key={table.id} className="bg-gradient-to-br from-slate-900 via-slate-900/90 to-slate-950 rounded-3xl p-6 border border-slate-800 hover:border-blue-500/40 shadow-2xl transition-all relative overflow-hidden group">
+                      <div className="absolute -inset-px bg-gradient-to-r from-blue-500/0 via-blue-500/10 to-purple-500/0 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+                      <div className="flex flex-col space-y-5 relative z-10">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-800/60 pb-3">
+                          <h4 className="text-xl sm:text-2xl font-black tracking-tight text-white uppercase bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">{table.category_name}</h4>
+                          <div className="flex flex-wrap gap-2">
+                            <span className="flex items-center gap-1 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-black uppercase px-2.5 py-1 rounded-md"><Users size={12} /> {table.max_players || 2} Players</span>
+                            <span className="flex items-center gap-1 bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[10px] font-black uppercase px-2.5 py-1 rounded-md"><HelpCircle size={12} /> {table.questions_count || 5} Qs</span>
+                            <span className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-black uppercase px-2.5 py-1 rounded-md"><Hourglass size={12} /> {table.total_time || "60s"}</span>
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex justify-between items-center pt-1">
-                        <div>
-                          <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">Est. Prize Pool</p>
-                          <p className="text-2xl sm:text-3xl font-black text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.2)]">₹{table.prize_pool}</p>
-                        </div>
-                        <div className="text-center flex flex-col items-end">
-                          <button onClick={() => handlePlayGame(table.entry_fee, table.slug)} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 text-white font-black text-xs sm:text-sm py-3 px-5 sm:px-6 rounded-xl transition-all active:scale-95 flex items-center gap-1.5 shadow-[0_4px_20px_rgba(37,99,235,0.4)] cursor-pointer">Play ₹{table.entry_fee} <ArrowUpRight size={14} /></button>
+                        <div className="flex justify-between items-center pt-1">
+                          <div>
+                            <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">Est. Prize Pool</p>
+                            <p className="text-2xl sm:text-3xl font-black text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.2)]">₹{table.prize_pool}</p>
+                          </div>
+                          <div className="text-center flex flex-col items-end">
+                            <button onClick={() => handlePlayGame(table.entry_fee, table.slug)} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 text-white font-black text-xs sm:text-sm py-3 px-5 sm:px-6 rounded-xl transition-all active:scale-95 flex items-center gap-1.5 shadow-[0_4px_20px_rgba(37,99,235,0.4)] cursor-pointer">Play ₹{table.entry_fee} <ArrowUpRight size={14} /></button>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  ))
+                )
               )}
             </div>
           </div>
@@ -690,4 +735,3 @@ function App() {
 }
 
 export default App;
-// 100% COMPLETE FILE - DO NOT DELETE ANY BRACKET
