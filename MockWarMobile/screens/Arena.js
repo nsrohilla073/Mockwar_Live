@@ -269,9 +269,30 @@ export default function Arena({ route, navigation }) {
     setGameState("waiting_result"); 
 
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-        ws.current.send(JSON.stringify({ action: 'game_finished', player_name: myGamerTagRef.current, score: finalMyPts, wpm: wpmRef.current }));
-        opponentsRef.current.forEach(opp => {
-            if (opp.isBot) { ws.current.send(JSON.stringify({ action: 'game_finished', player_name: opp.name, score: opp.score, wpm: 0 })); }
+        // 1. Sabse pehle aapka (Real Player) ka score jayega
+        ws.current.send(JSON.stringify({ 
+            action: 'game_finished', 
+            player_name: myGamerTagRef.current, 
+            score: finalMyPts, 
+            wpm: wpmRef.current 
+        }));
+
+        // 🔴 2. TRAFFIC POLICE FIX: Bots ke scores 300-300 ms ke gap par jayenge
+        let delay = 300;
+        opponentsRef.current.forEach((opp) => {
+            if (opp.isBot) { 
+                setTimeout(() => {
+                    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+                        ws.current.send(JSON.stringify({ 
+                            action: 'game_finished', 
+                            player_name: opp.name, 
+                            score: opp.score, 
+                            wpm: 0 
+                        }));
+                    }
+                }, delay);
+                delay += 300; // Har bot ko line me thoda aage badhate raho
+            }
         });
     }
   };
