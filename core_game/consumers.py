@@ -1,5 +1,3 @@
-# core_game/consumers.py
-
 import json
 import random
 import re
@@ -10,10 +8,20 @@ from core_game.models import GameTable
 from django.conf import settings
 import google.generativeai as genai
 
-# 🧠 GEMINI BRAIN (Database aur AI yahan sync honge)
+# 🧠 GEMINI BRAIN (Auto-Healing & Debugging)
 @database_sync_to_async
 def generate_ai_content(table_slug):
     try:
+        print(f"🤖 Starting AI Generation for: {table_slug}")
+        
+        # 1. API Key Check
+        api_key = getattr(settings, 'GEMINI_API_KEY', None)
+        if not api_key:
+            raise Exception("GEMINI_API_KEY is missing in Render Environment Variables!")
+            
+        genai.configure(api_key=api_key)
+        
+        # 2. Table Data Fetch
         table = GameTable.objects.filter(category__name__iexact=table_slug.replace('-', ' ')).first()
         if not table:
             table = GameTable.objects.first()
@@ -22,11 +30,17 @@ def generate_ai_content(table_slug):
         q_time = table.time_per_question if table else 12
         is_typing = 'typing' in table_slug.lower()
         
-        genai.configure(api_key=settings.GEMINI_API_KEY)
+        # 3. Dynamic Model Picker (Jo model zinda hoga, wahi chalega)
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        print(f"✅ Available Models: {available_models}")
         
-        # 🔥 FIX: Yahan hum universally supported 'gemini-pro' use karenge.
-        # Isse 404 Not Found wali problem hamesha ke liye khatam ho jayegi!
-        model = genai.GenerativeModel('gemini-pro')
+        # Sabse smart aur fast models ki list
+        target_model = 'models/gemini-1.5-flash'
+        if target_model not in available_models:
+            target_model = 'models/gemini-pro' if 'models/gemini-pro' in available_models else available_models[0]
+            
+        print(f"🎯 Selected Model: {target_model}")
+        model = genai.GenerativeModel(target_model)
 
         if is_typing:
             topics = ["Space Exploration", "Cybersecurity", "Ancient Indian History"]
@@ -44,13 +58,19 @@ def generate_ai_content(table_slug):
             res = model.generate_content(prompt)
             raw = res.text.strip()
             
+            print("raw AI text generated") # Debugging ke liye check karega
+            
+            # JSON Filter
             match = re.search(r'\[.*\]', raw, re.DOTALL)
             if match: raw = match.group(0)
             
-            return {"is_typing_test": False, "questions": json.loads(raw), "time_per_question": q_time}
+            parsed_json = json.loads(raw)
+            return {"is_typing_test": False, "questions": parsed_json, "time_per_question": q_time}
+            
     except Exception as e:
-        print("AI ERROR:", e)
-        # 🔴 STRONG 5 QUESTIONS FALLBACK
+        # 🔴 AGAR KUCH FAIL HUA, TOH YAHAN LOGS ME EXACT REASON AAYEGA
+        print(f"❌ AI CRITICAL ERROR: {str(e)}")
+        
         fallback_qs = [
             {"id":1, "question":"What is the capital of India? / भारत की राजधानी क्या है?", "options":["Mumbai / मुंबई", "New Delhi / नई दिल्ली", "Kolkata / कोलकाता", "Chennai / चेन्नई"], "answer":"B"},
             {"id":2, "question":"Which planet is known as the Red Planet? / लाल ग्रह किसे कहा जाता है?", "options":["Earth / पृथ्वी", "Venus / शुक्र", "Mars / मंगल", "Jupiter / बृहस्पति"], "answer":"C"},
