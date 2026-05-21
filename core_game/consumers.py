@@ -8,7 +8,7 @@ from core_game.models import GameTable
 from django.conf import settings
 import google.generativeai as genai
 
-# 🧠 GEMINI BRAIN (Highly Randomized Questions)
+# 🧠 GEMINI BRAIN
 @database_sync_to_async
 def generate_ai_content(table_slug):
     try:
@@ -44,16 +44,13 @@ def generate_ai_content(table_slug):
         model = genai.GenerativeModel(target_model)
 
         if is_typing:
-            topics = ["Space Exploration", "Cybersecurity", "Ancient Indian History", "Artificial Intelligence", "Deep Ocean Secrets", "Future of Humanity"]
+            topics = ["Space Exploration", "Cybersecurity", "Ancient Indian History", "Artificial Intelligence"]
             prompt = f"Generate a unique single paragraph of exactly 40 words about '{random.choice(topics)}' for an English typing test. No markdown, no quotes."
-            
             res = model.generate_content(prompt, generation_config=genai.types.GenerationConfig(temperature=0.9))
             para = res.text.strip().replace('\n', ' ').replace('"', '').replace('`', '')
             return {"is_typing_test": True, "paragraph": para, "time_limit": 60}
         else:
             clean_topic = table.category.name if table else table_slug.replace('-', ' ')
-            
-           # 🔥 THE MAGIC FIX: Ultimate Randomization (No repetition, Mixed difficulty)
             random_seed = random.randint(100000, 999999)
             
             prompt = f"""
@@ -66,25 +63,21 @@ def generate_ai_content(table_slug):
             - System Random Seed: {random_seed}. You MUST generate a completely new, fresh, and shuffled set of questions every single time. DO NOT REPEAT previous questions.
             
             Question and ALL 4 options MUST be Bilingual (English / Hindi) separated by a slash (/). 
-            (Note: For pure Math equations or pure English Grammar words, use Hindi translation only where it makes sense).
             
             Return STRICTLY a JSON array. DO NOT ADD ANY EXTRA TEXT OR MARKDOWN.
             Format:
             [ {{"id": 1, "question": "Question in Eng / प्रश्न हिंदी में?", "options": ["Option A / विकल्प A", "Option B / विकल्प B", "Option C / विकल्प C", "Option D / विकल्प D"], "answer": "A"}} ]
             """
             
-            # Temperature 1.0 = Maximum Creativity & Randomness
             res = model.generate_content(prompt, generation_config=genai.types.GenerationConfig(temperature=1.0))
             raw = res.text.strip()
             
-            # 🛡️ BULLETPROOF JSON EXTRACTION
             start_idx = raw.find('[')
             end_idx = raw.rfind(']')
             
             if start_idx != -1 and end_idx != -1:
                 clean_json_str = raw[start_idx:end_idx+1]
                 parsed_json = json.loads(clean_json_str)
-                # Ensure array elements are randomly shuffled just in case
                 random.shuffle(parsed_json)
                 return {"is_typing_test": False, "questions": parsed_json, "time_per_question": q_time}
             else:
@@ -125,6 +118,12 @@ class GameConsumer(AsyncWebsocketConsumer):
             cache.set(cache_key, True, 60)
             return True
         return False
+        
+    # 🔴 NAYA: Database se max_players nikalne ka function
+    @database_sync_to_async
+    def get_table_max_players(self, slug):
+        table = GameTable.objects.filter(category__name__iexact=slug.replace('-', ' ')).first()
+        return table.max_players if table else 2
 
     async def receive(self, text_data):
         data = json.loads(text_data)
@@ -155,28 +154,43 @@ class GameConsumer(AsyncWebsocketConsumer):
     def delete_cache(self, key): cache.delete(key)
 
     async def process_game_finish(self, player_name, final_score, wpm):
+        # 🔴 NAYA: DB se check karo table kitne logo ki hai
+        table_max_players = await self.get_table_max_players(self.table_slug)
+
         cache_key = f"match_state_{self.room_group_name}"
         state = await self.get_cache(cache_key)
         if not state: state = {'players': {}}
+        
+        # Player ka score update karo
         state['players'][player_name] = {'score': final_score, 'wpm': wpm}
         await self.set_cache(cache_key, state, 120)
 
-        if len(state['players']) >= 2:
-            players_list = list(state['players'].items())
-            p1_name, p1_data = players_list[0]
-            p2_name, p2_data = players_list[1]
-            winners, losers = [], []
+        # 🔴 NAYA: Ab hardcoded 2 nahi, asli max_players check hoga!
+        if len(state['players']) >= table_max_players:
+            # Sabhi players ko unke score aur WPM ke hisaab se descending order me sort karo
+            sorted_players = sorted(state['players'].items(), key=lambda x: (x[1]['score'], x[1]['wpm']), reverse=True)
 
-            if p1_data['score'] > p2_data['score']: winners.append(p1_name); losers.append(p2_name)
-            elif p2_data['score'] > p1_data['score']: winners.append(p2_name); losers.append(p1_name)
-            else:
-                if p1_data['wpm'] > p2_data['wpm']: winners.append(p1_name); losers.append(p2_name)
-                elif p2_data['wpm'] > p1_data['wpm']: winners.append(p2_name); losers.append(p1_name)
+            top_score = sorted_players[0][1]['score']
+            top_wpm = sorted_players[0][1]['wpm']
 
-            await self.channel_layer.group_send(self.room_group_name, {'type': 'game_message', 'action': 'match_result', 'winners': winners, 'losers': losers, 'is_draw': len(winners) == 0, 'final_scores': state['players']})
+            # Rank 1 walo ko winners me dalo (Agar tie hua toh 2 winners warna 1)
+            winners = [name for name, data in sorted_players if data['score'] == top_score and data['wpm'] == top_wpm]
+            losers = [name for name, data in sorted_players if name not in winners]
+
+            await self.channel_layer.group_send(
+                self.room_group_name, 
+                {
+                    'type': 'game_message', 
+                    'action': 'match_result', 
+                    'winners': winners, 
+                    'losers': losers, 
+                    'is_draw': len(winners) == table_max_players, # Draw sirf tab jab SABKA score exactly same ho
+                    'final_scores': state['players']
+                }
+            )
             await self.delete_cache(cache_key)
         else:
-            await self.send(text_data=json.dumps({'action': 'waiting_for_opponent', 'message': 'Wait...'}))
+            await self.send(text_data=json.dumps({'action': 'waiting_for_opponent', 'message': f"Waiting for others... ({len(state['players'])}/{table_max_players})"}))
 
     async def game_message(self, event):
         await self.send(text_data=json.dumps(event))
