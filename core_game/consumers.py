@@ -1,6 +1,5 @@
 import json
 import random
-import re
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.core.cache import cache
 from channels.db import database_sync_to_async
@@ -8,7 +7,7 @@ from core_game.models import GameTable
 from django.conf import settings
 import google.generativeai as genai
 
-# 🧠 GEMINI BRAIN (Auto-Healing & Debugging)
+# 🧠 GEMINI BRAIN (Auto-Healing & Bulletproof JSON)
 @database_sync_to_async
 def generate_ai_content(table_slug):
     try:
@@ -34,38 +33,57 @@ def generate_ai_content(table_slug):
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         print(f"✅ Available Models: {available_models}")
         
-        # Sabse smart aur fast models ki list
+        # 🎯 NAYA FIX: Naye 2.5 aur 1.5 flash dono ko handle karega
         target_model = 'models/gemini-1.5-flash'
-        if target_model not in available_models:
-            target_model = 'models/gemini-pro' if 'models/gemini-pro' in available_models else available_models[0]
-            
+        for model_name in available_models:
+            if '2.5-flash' in model_name:
+                target_model = model_name
+                break
+            elif '1.5-flash' in model_name:
+                target_model = model_name
+                break
+            elif 'pro' in model_name and 'vision' not in model_name:
+                target_model = model_name
+                
         print(f"🎯 Selected Model: {target_model}")
         model = genai.GenerativeModel(target_model)
 
         if is_typing:
-            topics = ["Space Exploration", "Cybersecurity", "Ancient Indian History"]
-            prompt = f"Generate a unique single paragraph of exactly 40 words about '{random.choice(topics)}' for an English typing test. No markdown."
-            res = model.generate_content(prompt)
-            return {"is_typing_test": True, "paragraph": res.text.strip().replace('\n', ' ').replace('"', ''), "time_limit": 60}
+            topics = ["Space Exploration", "Cybersecurity", "Ancient Indian History", "Artificial Intelligence"]
+            prompt = f"Generate a unique single paragraph of exactly 40 words about '{random.choice(topics)}' for an English typing test. No markdown, no quotes."
+            
+            # 🔥 NAYA FIX: Temperature 0.9 taaki har baar naya paragraph aaye
+            res = model.generate_content(prompt, generation_config=genai.types.GenerationConfig(temperature=0.9))
+            para = res.text.strip().replace('\n', ' ').replace('"', '').replace('`', '')
+            print("✅ Typing Paragraph Generated Successfully!")
+            return {"is_typing_test": True, "paragraph": para, "time_limit": 60}
         else:
             clean_topic = table.category.name if table else table_slug.replace('-', ' ')
             prompt = f"""
             Generate exactly {q_count} UNIQUE multiple choice quiz questions on the topic: "{clean_topic}".
             Question and options MUST be Bilingual (English / Hindi). 
-            Return STRICTLY a JSON array. Format:
+            Return STRICTLY a JSON array. DO NOT ADD ANY EXTRA TEXT OR MARKDOWN.
+            Format:
             [ {{"id": 1, "question": "Eng / Hin?", "options": ["A / ए", "B / बी", "C / सी", "D / डी"], "answer": "A"}} ]
             """
-            res = model.generate_content(prompt)
+            
+            # 🔥 NAYA FIX: Temperature 0.9 taaki har baar naye quiz questions aayein
+            res = model.generate_content(prompt, generation_config=genai.types.GenerationConfig(temperature=0.9))
             raw = res.text.strip()
             
-            print("raw AI text generated") # Debugging ke liye check karega
+            print(f"✅ AI Response Received! Length: {len(raw)} chars")
             
-            # JSON Filter
-            match = re.search(r'\[.*\]', raw, re.DOTALL)
-            if match: raw = match.group(0)
+            # 🛡️ BULLETPROOF JSON EXTRACTION (Regex hata diya, ye fail nahi hoga)
+            start_idx = raw.find('[')
+            end_idx = raw.rfind(']')
             
-            parsed_json = json.loads(raw)
-            return {"is_typing_test": False, "questions": parsed_json, "time_per_question": q_time}
+            if start_idx != -1 and end_idx != -1:
+                clean_json_str = raw[start_idx:end_idx+1]
+                parsed_json = json.loads(clean_json_str)
+                print("✅ JSON Successfully Parsed!")
+                return {"is_typing_test": False, "questions": parsed_json, "time_per_question": q_time}
+            else:
+                raise Exception("No JSON array brackets found in the AI response.")
             
     except Exception as e:
         # 🔴 AGAR KUCH FAIL HUA, TOH YAHAN LOGS ME EXACT REASON AAYEGA
