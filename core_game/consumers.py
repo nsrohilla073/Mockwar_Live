@@ -122,7 +122,11 @@ class GameConsumer(AsyncWebsocketConsumer):
     # 🔴 NAYA: Database se max_players nikalne ka function
     @database_sync_to_async
     def get_table_max_players(self, slug):
-        table = GameTable.objects.filter(category__name__iexact=slug.replace('-', ' ')).first()
+        if str(slug).isdigit():
+            table = GameTable.objects.filter(id=int(slug)).first()
+        else:
+            table = GameTable.objects.filter(category__name__iexact=str(slug).replace('-', ' ')).first()
+        
         return table.max_players if table else 2
 
     async def receive(self, text_data):

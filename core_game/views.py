@@ -280,7 +280,10 @@ class GetGameContentAPIView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request, category_slug):
         try:
-            table = GameTable.objects.filter(category__name__iexact=category_slug.replace('-', ' ')).first()
+            if str(category_slug).isdigit():
+                table = GameTable.objects.filter(id=int(category_slug)).first()
+            else:
+                table = GameTable.objects.filter(category__name__iexact=str(category_slug).replace('-', ' ')).first()
             if not table: table = GameTable.objects.first()
             if not table: return Response({"error": "No tables available"}, status=status.HTTP_404_NOT_FOUND)
             
