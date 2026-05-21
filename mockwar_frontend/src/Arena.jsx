@@ -12,7 +12,6 @@ function Arena() {
   
   const hasSubmitted = useRef(false); 
 
-  // 🔊 SOUND SYSTEM SETUP
   const [soundEnabled, setSoundEnabled] = useState(true);
   
   const playSound = (soundFile) => {
@@ -24,7 +23,6 @@ function Arena() {
   };
   const apiCalled = useRef(false); 
 
-  // 🕒 Matchmaking States
   const [maxPlayers, setMaxPlayers] = useState(2); 
   const maxPlayersRef = useRef(2); 
   const [gameState, setGameState] = useState("searching"); 
@@ -37,7 +35,6 @@ function Arena() {
   const [timePerQ, setTimePerQ] = useState(12); 
   const [apiLoading, setApiLoading] = useState(false);
 
-  // 🏆 Scoreboard & WebSocket States
   const [myPoints, setMyPoints] = useState(0);
   const myPointsRef = useRef(0);
   const myGamerTagRef = useRef("Live_Player"); 
@@ -48,8 +45,10 @@ function Arena() {
   
   const [matchStandings, setMatchStandings] = useState([]);
   const [matchReward, setMatchReward] = useState(0); 
+  
+  // 🔴 NAYA STATE UI FIX KE LIYE
+  const [matchStatus, setMatchStatus] = useState(''); 
 
-  // 🔥 Transparency tracking state
   const [userAnswers, setUserAnswers] = useState([]);
 
   const updateOpponents = (newOppFunc) => {
@@ -63,7 +62,6 @@ function Arena() {
   useEffect(() => { myPointsRef.current = myPoints; }, [myPoints]);
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
 
-  // 📚 Content Hooks
   const [questions, setQuestions] = useState([]);
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [targetParagraph, setTargetParagraph] = useState("");
@@ -87,7 +85,6 @@ function Arena() {
       }
   };
 
-  // 1. Initialize Game (Lobby me ghusna)
   useEffect(() => {
     if (!token) { navigate("/auth"); return; }
 
@@ -96,7 +93,6 @@ function Arena() {
         const profRes = await axios.get(`${API_BASE}/api/user/profile/`, { headers: { Authorization: `Bearer ${token}` } });
         myGamerTagRef.current = profRes.data.gamer_tag;
 
-        // 🔥 NAYA: API ab sirf room assign karegi, sawal nahi degi!
         const res = await axios.get(`${API_BASE}/api/game/content/${tableId}/`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -108,7 +104,6 @@ function Arena() {
 
         const matchRoomId = res.data.room_id || `room_${Date.now()}`;
         
-        // WebSocket se connect ho jao us private room me
         ws.current = new WebSocket(`${WS_BASE}/ws/arena/${tableId}/${matchRoomId}/`);
         
         ws.current.onopen = () => {
@@ -119,7 +114,6 @@ function Arena() {
             const data = JSON.parse(event.data);
             const myTag = myGamerTagRef.current;
 
-            // 🚨 THE NEW MAGIC: Jab Server ek sath sabko sawal bhej de!
             if (data.action === 'questions_ready') {
                 if (data.content.is_typing_test) {
                     setIsTypingMode(true);
@@ -132,7 +126,6 @@ function Arena() {
                     setTimeLeft(data.content.time_per_question);
                 }
                 
-                // Sawal aate hi thoda wait karke Game Start kardo! (Takki dono ki screen sync rahe)
                 setTimeout(() => {
                     setGameState("playing");
                     typingStartTime.current = Date.now();
@@ -179,7 +172,6 @@ function Arena() {
     return () => { if (ws.current) ws.current.close(); };
   }, [tableId, token, navigate]);
 
-  // 2. TIMERS & DYNAMIC BOTS INJECTION
   useEffect(() => {
     if (gameState !== "searching") return;
 
@@ -236,20 +228,14 @@ function Arena() {
       triggerMatchFound();
   };
 
-  // 🎯 FRONTEND ORDERING BACKEND TO SEND QUESTIONS
   const triggerMatchFound = () => {
-      // Server ko order do sawal generate karne ka
       if (ws.current && ws.current.readyState === WebSocket.OPEN) {
           ws.current.send(JSON.stringify({ action: 'request_questions' }));
       }
-      
       setGameState("found");
       playSound('match-found.mp3');
-      
-      // Note: Ab hum "playing" state me WebSocket se sawal aane ke baad jayenge, yahan se nahi!
   };
 
-  // 3. GAMEPLAY & AI BOTS LOGIC
   useEffect(() => {
     if (gameState !== "playing") return;
     if (timeLeft > 0) {
@@ -370,7 +356,6 @@ function Arena() {
 
   const handlePaste = (e) => { e.preventDefault(); };
 
-  // 4. 🚨 SEND SCORE TO REFEREE
   const triggerRefereeSubmit = (finalMyPts) => {
     if (hasSubmitted.current) return;
     hasSubmitted.current = true; 
@@ -398,7 +383,6 @@ function Arena() {
     }
   };
 
-  // 5. 🏆 FINALLY: REFEREE SENDS RESULT
   const handleMatchResult = async (data) => {
       if (apiCalled.current) return;
       apiCalled.current = true;
@@ -406,15 +390,17 @@ function Arena() {
       setApiLoading(true);
 
       const myTag = myGamerTagRef.current;
-      let matchStatus = 'LOSS';
+      let cStatus = 'LOSS';
 
       if (data.is_draw) {
-          matchStatus = 'DRAW';
+          cStatus = 'DRAW';
       } else if (data.winners.includes(myTag)) {
-          matchStatus = 'WIN';
+          cStatus = 'WIN';
       }
 
-      if (matchStatus === 'WIN') playSound('win.mp3');
+      setMatchStatus(cStatus);
+
+      if (cStatus === 'WIN') playSound('win.mp3');
       else playSound('lose.mp3'); 
 
       const finalStandings = Object.entries(data.final_scores).map(([name, stats]) => ({
@@ -436,7 +422,7 @@ function Arena() {
               score: data.final_scores[myTag].score,
               wpm: data.final_scores[myTag].wpm,
               accuracy: accuracyRef.current,
-              status: matchStatus
+              status: cStatus
           }, { headers: { Authorization: `Bearer ${token}` } });
 
           setMatchReward(res.data.prize_won || 0); 
@@ -450,7 +436,6 @@ function Arena() {
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-100 font-sans p-4 relative overflow-hidden select-none pb-20">
       
-      {/* 🔊 SOUND TOGGLE BUTTON */}
       <button onClick={() => setSoundEnabled(!soundEnabled)} className="absolute top-4 right-4 z-50 bg-slate-900 border border-slate-700 p-2 rounded-full text-slate-400 hover:text-blue-400 transition-colors">
         {soundEnabled ? <Volume2 size={20} /> : <VolumeX size={20} className="text-red-400" />}
       </button>
@@ -458,7 +443,6 @@ function Arena() {
       <div className="absolute top-1/4 -left-20 w-96 h-96 bg-blue-600/10 rounded-full blur-[100px] pointer-events-none"></div>
       <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-indigo-600/10 rounded-full blur-[100px] pointer-events-none"></div>
 
-      {/* 🔍 THE WAITING ROOM */}
       {gameState === "searching" && (
         <div className="flex flex-col items-center space-y-8 animate-fade-in z-10 w-full max-w-sm">
           <div className="text-center">
@@ -504,7 +488,6 @@ function Arena() {
         </div>
       )}
 
-      {/* ⚔️ MATCH FOUND */}
       {gameState === "found" && (
         <div className="flex flex-col items-center text-center space-y-4 animate-scale-up z-10">
           <div className="bg-emerald-500/10 p-5 rounded-3xl border border-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.3)] relative overflow-hidden">
@@ -521,7 +504,6 @@ function Arena() {
         </div>
       )}
 
-      {/* 🎮 LIVE GAME PLAYING */}
       {gameState === "playing" && (
         <div className="w-full max-w-xl animate-fade-in space-y-5 z-10">
           <div className="space-y-3 bg-slate-900/80 backdrop-blur-md border border-slate-800 p-4 rounded-3xl shadow-[0_0_30px_rgba(0,0,0,0.5)]">
@@ -579,7 +561,6 @@ function Arena() {
                 <span className="text-emerald-400 flex items-center gap-1.5"><Crosshair size={16}/> Accuracy: {accuracy}%</span>
               </div>
 
-              {/* 🚀 THE PRO TYPING ARENA (MonkeyType Style) */}
               <div 
                 className="relative w-full bg-slate-950/80 backdrop-blur-md p-6 md:p-8 rounded-[2rem] border border-slate-700/80 shadow-[0_0_40px_rgba(0,0,0,0.5)] overflow-hidden cursor-text group" 
                 onClick={() => document.getElementById('hidden-typer')?.focus()}
@@ -634,7 +615,6 @@ function Arena() {
         </div>
       )}
 
-      {/* ⏳ WAITING FOR OPPONENT SCREEN */}
       {gameState === "waiting_result" && (
         <div className="flex flex-col items-center justify-center space-y-6 animate-fade-in z-10 w-full max-w-sm text-center">
             <Loader2 size={60} className="animate-spin text-blue-500 mb-4" />
@@ -643,25 +623,25 @@ function Arena() {
         </div>
       )}
 
-      {/* 🏆 LEADERBOARD & TRANSPARENCY SCREEN */}
       {gameState === "finished" && (
         <div className="w-full max-w-md space-y-6 z-10 animate-scale-up">
           <div className="bg-slate-900/90 backdrop-blur-xl p-6 rounded-[2rem] border border-slate-700 text-center shadow-[0_0_50px_rgba(0,0,0,0.5)]">
-             <Trophy size={60} className={`${matchReward > 0 && myPoints > 0 ? "text-emerald-400 drop-shadow-[0_0_20px_rgba(52,211,153,0.4)]" : "text-red-400 drop-shadow-[0_0_20px_rgba(248,113,113,0.4)]"} mb-3`} />
-             <h1 className={`text-3xl font-black tracking-tight mb-4 uppercase ${matchReward > 0 ? "text-emerald-400" : matchStandings[0]?.score === myPoints ? "text-yellow-400" : "text-red-500"}`}>
-                {matchReward > 0 ? "Prize Secured!" : matchStandings[0]?.score === myPoints ? "Match Tied / Draw" : "Defeated!"}
+             <Trophy size={60} className={`${matchStatus === 'WIN' ? "text-emerald-400 drop-shadow-[0_0_20px_rgba(52,211,153,0.4)]" : matchStatus === 'DRAW' ? "text-yellow-400 drop-shadow-[0_0_20px_rgba(234,179,8,0.4)]" : "text-red-400 drop-shadow-[0_0_20px_rgba(248,113,113,0.4)]"} mb-3 mx-auto`} />
+             
+             <h1 className={`text-3xl font-black tracking-tight mb-4 uppercase ${matchStatus === 'WIN' ? "text-emerald-400" : matchStatus === 'DRAW' ? "text-yellow-400" : "text-red-500"}`}>
+                {matchStatus === 'WIN' ? "Prize Secured!" : matchStatus === 'DRAW' ? "Match Tied / Draw" : "Defeated!"}
              </h1>
 
              <div className="mb-6 animate-fade-in w-full px-2">
-                {matchReward > 0 ? (
+                {matchStatus === 'WIN' ? (
                    <div className="bg-emerald-500/10 border border-emerald-500/30 px-6 py-3 rounded-2xl text-center shadow-[0_0_20px_rgba(16,185,129,0.2)]">
                       <p className="text-emerald-400 text-[10px] font-black uppercase tracking-widest mb-1">Winnings Added to Wallet</p>
                       <p className="text-3xl font-black text-emerald-400">+₹{matchReward}</p>
                    </div>
-                ) : matchStandings[0]?.score === myPoints ? (
+                ) : matchStatus === 'DRAW' ? (
                    <div className="bg-yellow-500/10 border border-yellow-500/30 px-6 py-3 rounded-2xl text-center shadow-[0_0_20px_rgba(234,179,8,0.2)]">
                       <p className="text-yellow-500 text-[10px] font-black uppercase tracking-widest mb-1">Entry Fee Refunded</p>
-                      <p className="text-2xl font-black text-yellow-500">Fees Refunded</p>
+                      <p className="text-3xl font-black text-yellow-500">+₹{matchReward}</p>
                    </div>
                 ) : (
                    <div className="bg-red-500/10 border border-red-500/30 px-6 py-3 rounded-2xl text-center shadow-[0_0_20px_rgba(248,113,113,0.2)]">
