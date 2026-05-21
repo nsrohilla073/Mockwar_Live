@@ -1,3 +1,5 @@
+# core_game/consumers.py
+
 import json
 import random
 import re
@@ -8,6 +10,7 @@ from core_game.models import GameTable
 from django.conf import settings
 import google.generativeai as genai
 
+# 🧠 GEMINI BRAIN (Database aur AI yahan sync honge)
 @database_sync_to_async
 def generate_ai_content(table_slug):
     try:
@@ -21,12 +24,9 @@ def generate_ai_content(table_slug):
         
         genai.configure(api_key=settings.GEMINI_API_KEY)
         
-        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        target_model_name = 'models/gemini-pro'
-        for name in available_models:
-            if 'gemini-1.5-flash' in name: target_model_name = name; break
-            
-        model = genai.GenerativeModel(target_model_name)
+        # 🔥 FIX: Yahan hum universally supported 'gemini-pro' use karenge.
+        # Isse 404 Not Found wali problem hamesha ke liye khatam ho jayegi!
+        model = genai.GenerativeModel('gemini-pro')
 
         if is_typing:
             topics = ["Space Exploration", "Cybersecurity", "Ancient Indian History"]
