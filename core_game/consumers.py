@@ -53,19 +53,24 @@ def generate_ai_content(table_slug):
         else:
             clean_topic = table.category.name if table else table_slug.replace('-', ' ')
             
-            # 🔥 THE MAGIC FIX: Random Seed + Strict Warning
+           # 🔥 THE MAGIC FIX: Ultimate Randomization (No repetition, Mixed difficulty)
             random_seed = random.randint(100000, 999999)
             
             prompt = f"""
-            Generate exactly {q_count} UNIQUE, UNCOMMON, and HARD multiple choice quiz questions on the topic: "{clean_topic}".
-            CRITICAL INSTRUCTION: DO NOT ask basic or common questions (like capital, formation date, basic geography, etc.). 
-            Pick rare facts, deep history, obscure personalities, or hard statistics. 
-            (System Random Seed: {random_seed} - You MUST generate completely different questions than any previous request).
+            Generate exactly {q_count} multiple choice questions randomly on the topic: "{clean_topic}".
             
-            Question and options MUST be Bilingual (English / Hindi). 
+            CRITICAL INSTRUCTION FOR RANDOMNESS: 
+            - Pick these {q_count} questions from a MASSIVE pool of possibilities. 
+            - Mix basic, intermediate, and advanced level questions. DO NOT stick to just one sub-topic. 
+            - If the topic is GK, pick from dates, places, people, events, etc. If it is Math/Science/English, pick random concepts.
+            - System Random Seed: {random_seed}. You MUST generate a completely new, fresh, and shuffled set of questions every single time. DO NOT REPEAT previous questions.
+            
+            Question and ALL 4 options MUST be Bilingual (English / Hindi) separated by a slash (/). 
+            (Note: For pure Math equations or pure English Grammar words, use Hindi translation only where it makes sense).
+            
             Return STRICTLY a JSON array. DO NOT ADD ANY EXTRA TEXT OR MARKDOWN.
             Format:
-            [ {{"id": 1, "question": "Eng / Hin?", "options": ["A / ए", "B / बी", "C / सी", "D / डी"], "answer": "A"}} ]
+            [ {{"id": 1, "question": "Question in Eng / प्रश्न हिंदी में?", "options": ["Option A / विकल्प A", "Option B / विकल्प B", "Option C / विकल्प C", "Option D / विकल्प D"], "answer": "A"}} ]
             """
             
             # Temperature 1.0 = Maximum Creativity & Randomness
