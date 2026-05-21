@@ -1,3 +1,5 @@
+# core_game/views.py
+
 import razorpay
 import json
 import os
@@ -10,6 +12,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.contrib.auth.models import User
 from django.db import transaction
+import traceback
+from datetime import datetime
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -21,6 +25,7 @@ from django.core.cache import cache
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import auth as firebase_auth
+
 from .models import Wallet, Transaction, UserProfile, QuizCategory, GameTable, MatchHistory
 
 if not firebase_admin._apps:
@@ -32,6 +37,7 @@ RAZORPAY_KEY_ID = getattr(settings, 'RAZORPAY_KEY_ID', 'YOUR_TEST_KEY_ID')
 RAZORPAY_KEY_SECRET = getattr(settings, 'RAZORPAY_KEY_SECRET', 'YOUR_TEST_KEY_SECRET')
 RAZORPAY_WEBHOOK_SECRET = getattr(settings, 'RAZORPAY_WEBHOOK_SECRET', 'my_secret_token')
 razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+
 
 class CreateOrderAPIView(APIView):
     authentication_classes = [JWTAuthentication]
@@ -72,7 +78,7 @@ class RazorpayWebhookAPIView(APIView):
                     wallet.save()
                     return HttpResponse("Wallet Updated Successfully", status=200)
                 except Transaction.DoesNotExist:
-                    return HttpResponse("Transaction Not Found", status=200)
+                    return HttpResponse("Transaction Not Found or Already Processed", status=200)
             return HttpResponse("Event ignored", status=200)
         except razorpay.errors.SignatureVerificationError:
             return HttpResponse("Invalid Webhook Signature", status=400)
@@ -84,7 +90,7 @@ class VerifyPaymentAPIView(APIView):
         razorpay_payment_id = request.data.get('razorpay_payment_id')
         razorpay_order_id = request.data.get('razorpay_order_id')
         razorpay_signature = request.data.get('razorpay_signature')
-        if not all([razorpay_payment_id, razorpay_order_id, razorpay_signature]): return Response({"error": "Missing signature"}, status=status.HTTP_400_BAD_REQUEST)
+        if not all([razorpay_payment_id, razorpay_order_id, razorpay_signature]): return Response({"error": "Missing required signature fields"}, status=status.HTTP_400_BAD_REQUEST)
         try:
             params_dict = {'razorpay_order_id': razorpay_order_id, 'razorpay_payment_id': razorpay_payment_id, 'razorpay_signature': razorpay_signature}
             razorpay_client.utility.verify_payment_signature(params_dict)
@@ -96,7 +102,11 @@ class VerifyPaymentAPIView(APIView):
             wallet = Wallet.objects.get(user=request.user)
             wallet.deposit_balance += transaction_obj.amount
             wallet.save()
-            return Response({"message": "Payment Verified"}, status=status.HTTP_200_OK)
+            return Response({"message": "Payment Verified & Wallet Updated"}, status=status.HTTP_200_OK)
+        except razorpay.errors.SignatureVerificationError:
+            return Response({"error": "Signature verification failed"}, status=status.HTTP_400_BAD_REQUEST)
+        except Transaction.DoesNotExist:
+            return Response({"error": "Transaction match not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -116,16 +126,16 @@ class WithdrawRequestAPIView(APIView):
     def post(self, request):
         amount = Decimal(str(request.data.get('amount', 0)))
         upi_id = request.data.get('upi_id')
-        if amount < 50: return Response({"error": "Minimum withdrawal is ₹50"}, status=status.HTTP_400_BAD_REQUEST)
+        if amount < 50: return Response({"error": "Minimum withdrawal amount is ₹50"}, status=status.HTTP_400_BAD_REQUEST)
         if not upi_id: return Response({"error": "UPI ID is required"}, status=status.HTTP_400_BAD_REQUEST)
         try:
             with transaction.atomic():
                 wallet = Wallet.objects.select_for_update().get(user=request.user)
-                if wallet.winning_balance < amount: return Response({"error": "Insufficient Winnings."}, status=status.HTTP_400_BAD_REQUEST)
+                if wallet.winning_balance < amount: return Response({"error": "Insufficient Winning Balance."}, status=status.HTTP_400_BAD_REQUEST)
                 wallet.winning_balance -= amount
                 wallet.save()
                 Transaction.objects.create(user=request.user, amount=amount, tx_type='WITHDRAW', status='PENDING', upi_id=upi_id)
-            return Response({"success": True, "message": "Withdrawal request placed!"}, status=status.HTTP_200_OK)
+            return Response({"success": True, "message": "Withdrawal request placed! Pending admin approval."}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -137,12 +147,12 @@ class ClaimBonusAPIView(APIView):
             user = request.user
             today = timezone.localdate()
             already_claimed = Transaction.objects.filter(user=user, tx_type='BONUS', created_at__date=today).exists()
-            if already_claimed: return Response({"error": "You already claimed today."}, status=status.HTTP_400_BAD_REQUEST)
+            if already_claimed: return Response({"error": "You have already claimed today's bonus. Come back tomorrow!"}, status=status.HTTP_400_BAD_REQUEST)
             wallet = Wallet.objects.get(user=user)
             wallet.deposit_balance += Decimal('5.00')
             wallet.save()
             Transaction.objects.create(user=user, amount=Decimal('5.00'), tx_type='BONUS', status='SUCCESS', razorpay_order_id=f"BONUS_{int(time.time())}")
-            return Response({"success": True, "message": "₹5 Bonus added!"}, status=status.HTTP_200_OK)
+            return Response({"success": True, "message": "₹5 Bonus Cash added to your wallet!"}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -164,7 +174,7 @@ class PlayGameAPIView(APIView):
                         wallet.winning_balance -= remaining
                     wallet.save()
                     Transaction.objects.create(user=request.user, amount=entry_fee, tx_type='GAME_ENTRY', status='SUCCESS')
-                    return Response({"success": True}, status=status.HTTP_200_OK)
+                    return Response({"success": True, "message": "Entry fee deducted"}, status=status.HTTP_200_OK)
                 else:
                     return Response({"error": "Insufficient balance"}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
@@ -185,7 +195,7 @@ class FirebaseLoginAPIView(APIView):
             try:
                 user = User.objects.get(username=uid)
                 profile, created = UserProfile.objects.get_or_create(user=user)
-                if not profile.gamer_tag: profile.gamer_tag = f"PRO_{random.randint(100, 999)}"; profile.save()
+                if not profile.gamer_tag: profile.gamer_tag = f"PRO_ADMIN{random.randint(100, 999)}"; profile.save()
                 Wallet.objects.get_or_create(user=user)
                 refresh = RefreshToken.for_user(user)
                 return Response({"is_new_user": False, "refresh": str(refresh), "access": str(refresh.access_token)}, status=status.HTTP_200_OK)
@@ -198,7 +208,7 @@ class FirebaseLoginAPIView(APIView):
                     existing_user = User.objects.filter(email=email).first()
                 if existing_user:
                     profile, created = UserProfile.objects.get_or_create(user=existing_user)
-                    if not profile.gamer_tag: profile.gamer_tag = f"PRO_{random.randint(100, 999)}"
+                    if not profile.gamer_tag: profile.gamer_tag = f"PRO_ADMIN{random.randint(100, 999)}"
                     if phone_10_digit and not profile.mobile_number: profile.mobile_number = phone_10_digit
                     profile.save()
                     Wallet.objects.get_or_create(user=existing_user)
@@ -206,7 +216,7 @@ class FirebaseLoginAPIView(APIView):
                     return Response({"is_new_user": False, "refresh": str(refresh), "access": str(refresh.access_token)}, status=status.HTTP_200_OK)
                 return Response({"is_new_user": True, "uid": uid, "phone": raw_phone, "email": email}, status=status.HTTP_200_OK)
         except Exception as e:
-            return Response({"error": "Verification failed."}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({"error": "Server error during verification."}, status=status.HTTP_401_UNAUTHORIZED)
 
 class CompleteRegistrationAPIView(APIView):
     authentication_classes = []
@@ -242,11 +252,11 @@ class CompleteRegistrationAPIView(APIView):
                         referrer_user = referrer_profile.user
                         referrer_wallet = Wallet.objects.get(user=referrer_user)
                         referrer_wallet.deposit_balance += Decimal('50.00'); referrer_wallet.save()
-                        Transaction.objects.create(user=referrer_user, amount=Decimal('50.00'), tx_type='BONUS', status='SUCCESS', razorpay_order_id=f"REF_{int(time.time())}")
+                        Transaction.objects.create(user=referrer_user, amount=Decimal('50.00'), tx_type='BONUS', status='SUCCESS', razorpay_order_id=f"REF_REWARD_{int(time.time())}")
                         new_wallet.deposit_balance += Decimal('50.00'); new_wallet.save()
-                        Transaction.objects.create(user=new_user, amount=Decimal('50.00'), tx_type='BONUS', status='SUCCESS', razorpay_order_id=f"WEL_{int(time.time())}")
+                        Transaction.objects.create(user=new_user, amount=Decimal('50.00'), tx_type='BONUS', status='SUCCESS', razorpay_order_id=f"WELCOME_BONUS_{int(time.time())}")
             refresh = RefreshToken.for_user(new_user)
-            return Response({"username": custom_gamer_tag, "refresh": str(refresh), "access": str(refresh.access_token)}, status=status.HTTP_201_CREATED)
+            return Response({"message": "Account created successfully!", "username": custom_gamer_tag, "refresh": str(refresh), "access": str(refresh.access_token)}, status=status.HTTP_201_CREATED)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -270,20 +280,13 @@ class GetGameContentAPIView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request, category_slug):
         try:
-            # 🔴 ASLI BULLETPROOF HYBRID FINDER (For Website Slug & Mobile ID)
-            table = None
-            if str(category_slug).isdigit():
-                table = GameTable.objects.filter(id=int(category_slug)).first()
-            else:
-                for t in GameTable.objects.filter(is_live=True):
-                    if t.category.name.lower().replace(' ', '-') == str(category_slug):
-                        table = t
-                        break
-
+            table = GameTable.objects.filter(category__name__iexact=category_slug.replace('-', ' ')).first()
             if not table: table = GameTable.objects.first()
-            if not table: return Response({"error": "No tables"}, status=status.HTTP_404_NOT_FOUND)
+            if not table: return Response({"error": "No tables available"}, status=status.HTTP_404_NOT_FOUND)
             
             max_players = table.max_players
+            
+            # 🎯 LOBBY MATCHMAKING (SIRF ROOM ASSIGN HOGA)
             match_queue_key = f"match_queue_{category_slug}"
             queue_data = cache.get(match_queue_key)
             
@@ -291,21 +294,23 @@ class GetGameContentAPIView(APIView):
                 room_id = queue_data['room_id']
                 queue_data['player_count'] += 1
                 if queue_data['player_count'] >= max_players:
-                    cache.delete(match_queue_key)  
+                    cache.delete(match_queue_key)  # Room Full!
                 else:
                     cache.set(match_queue_key, queue_data, timeout=65)
             else:
-                room_id = f"room_{int(time.time())}_{random.randint(100, 999)}"
+                room_id = f"room_{int(time.time())}_{random.randint(1000, 9999)}"
                 if max_players > 1:
                     cache.set(match_queue_key, {"room_id": room_id, "player_count": 1}, timeout=65)
 
             return Response({
                 "room_id": room_id,
                 "max_players": max_players,
-                "is_typing_test": 'typing' in table.category.name.lower()
+                "is_typing_test": 'typing' in category_slug.lower()
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
+            import traceback
+            traceback.print_exc() 
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class SubmitGameResultAPIView(APIView):
@@ -319,33 +324,26 @@ class SubmitGameResultAPIView(APIView):
             wpm = int(request.data.get('wpm', 0))
             status_result = request.data.get('status', 'LOSS')
 
-            # 🔴 ASLI BULLETPROOF HYBRID FINDER
-            table = None
-            if str(table_slug).isdigit():
-                table = GameTable.objects.filter(id=int(table_slug)).first()
-            else:
-                for t in GameTable.objects.filter(is_live=True):
-                    if t.category.name.lower().replace(' ', '-') == str(table_slug):
-                        table = t
-                        break
-
+            table = GameTable.objects.filter(category__name__iexact=table_slug.replace('-', ' ')).first()
             if not table: return Response({"error": "Table not found"}, status=status.HTTP_404_NOT_FOUND)
 
-            is_typing = 'typing' in table.category.name.lower()
+            is_typing = 'typing' in table_slug.lower()
             if not is_typing:
                 max_points_per_q = 10 + table.time_per_question
                 max_possible_score = table.questions_count * max_points_per_q
                 if score > max_possible_score:
-                    return Response({"error": "Anti-Cheat block."}, status=status.HTTP_403_FORBIDDEN)
+                    return Response({"error": "Anti-Cheat: Impossible score detected."}, status=status.HTTP_403_FORBIDDEN)
             else:
                 if wpm > 250 or score > (wpm + 100): 
-                    return Response({"error": "Anti-Cheat block."}, status=status.HTTP_403_FORBIDDEN)
+                    return Response({"error": "Anti-Cheat: Superhuman speed detected."}, status=status.HTTP_403_FORBIDDEN)
 
             prize_won = Decimal('0.00')
             tx_type = None
 
             with transaction.atomic():
                 wallet = Wallet.objects.select_for_update().get(user=user)
+                
+                # 🔴 FIX: 1 Minute ki jagah 10 Seconds ka lock
                 already_submitted = MatchHistory.objects.filter(
                     user=user, table=table, 
                     played_at__gte=timezone.now() - timezone.timedelta(seconds=10)
@@ -366,7 +364,7 @@ class SubmitGameResultAPIView(APIView):
                 wallet.save()
                 MatchHistory.objects.create(user=user, table=table, score=score, wpm=wpm, is_winner=(status_result == 'WIN'), prize_won=prize_won)
                 if tx_type:
-                    Transaction.objects.create(user=user, amount=prize_won, tx_type=tx_type, status='SUCCESS', razorpay_order_id=f"GAME_REW_{int(time.time())}")
+                    Transaction.objects.create(user=user, amount=prize_won, tx_type=tx_type, status='SUCCESS', razorpay_order_id=f"GAME_REWARD_{int(time.time())}")
 
             return Response({"prize_won": prize_won, "match_status": status_result}, status=status.HTTP_200_OK)
         except Exception as e:
@@ -377,16 +375,7 @@ class LeaderboardAPIView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request, table_slug):
         try:
-            # 🔴 ASLI BULLETPROOF HYBRID FINDER
-            table = None
-            if str(table_slug).isdigit():
-                table = GameTable.objects.filter(id=int(table_slug)).first()
-            else:
-                for t in GameTable.objects.filter(is_live=True):
-                    if t.category.name.lower().replace(' ', '-') == str(table_slug):
-                        table = t
-                        break
-
+            table = GameTable.objects.filter(category__name__iexact=table_slug.replace('-', ' ')).first()
             if not table: return Response({"error": "Table not found"}, status=status.HTTP_404_NOT_FOUND)
 
             history = MatchHistory.objects.filter(table=table).order_by('-score')
