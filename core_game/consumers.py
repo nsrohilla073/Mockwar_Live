@@ -1,5 +1,6 @@
 import json
 import random
+import re
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.core.cache import cache
 from channels.db import database_sync_to_async
@@ -7,20 +8,18 @@ from core_game.models import GameTable
 from django.conf import settings
 import google.generativeai as genai
 
-# 🧠 GEMINI BRAIN (Auto-Healing & Bulletproof JSON)
+# 🧠 GEMINI BRAIN (Highly Randomized Questions)
 @database_sync_to_async
 def generate_ai_content(table_slug):
     try:
         print(f"🤖 Starting AI Generation for: {table_slug}")
         
-        # 1. API Key Check
         api_key = getattr(settings, 'GEMINI_API_KEY', None)
         if not api_key:
             raise Exception("GEMINI_API_KEY is missing in Render Environment Variables!")
             
         genai.configure(api_key=api_key)
         
-        # 2. Table Data Fetch
         table = GameTable.objects.filter(category__name__iexact=table_slug.replace('-', ' ')).first()
         if not table:
             table = GameTable.objects.first()
@@ -29,11 +28,8 @@ def generate_ai_content(table_slug):
         q_time = table.time_per_question if table else 12
         is_typing = 'typing' in table_slug.lower()
         
-        # 3. Dynamic Model Picker (Jo model zinda hoga, wahi chalega)
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        print(f"✅ Available Models: {available_models}")
         
-        # 🎯 NAYA FIX: Naye 2.5 aur 1.5 flash dono ko handle karega
         target_model = 'models/gemini-1.5-flash'
         for model_name in available_models:
             if '2.5-flash' in model_name:
@@ -45,50 +41,52 @@ def generate_ai_content(table_slug):
             elif 'pro' in model_name and 'vision' not in model_name:
                 target_model = model_name
                 
-        print(f"🎯 Selected Model: {target_model}")
         model = genai.GenerativeModel(target_model)
 
         if is_typing:
-            topics = ["Space Exploration", "Cybersecurity", "Ancient Indian History", "Artificial Intelligence"]
+            topics = ["Space Exploration", "Cybersecurity", "Ancient Indian History", "Artificial Intelligence", "Deep Ocean Secrets", "Future of Humanity"]
             prompt = f"Generate a unique single paragraph of exactly 40 words about '{random.choice(topics)}' for an English typing test. No markdown, no quotes."
             
-            # 🔥 NAYA FIX: Temperature 0.9 taaki har baar naya paragraph aaye
             res = model.generate_content(prompt, generation_config=genai.types.GenerationConfig(temperature=0.9))
             para = res.text.strip().replace('\n', ' ').replace('"', '').replace('`', '')
-            print("✅ Typing Paragraph Generated Successfully!")
             return {"is_typing_test": True, "paragraph": para, "time_limit": 60}
         else:
             clean_topic = table.category.name if table else table_slug.replace('-', ' ')
+            
+            # 🔥 THE MAGIC FIX: Random Seed + Strict Warning
+            random_seed = random.randint(100000, 999999)
+            
             prompt = f"""
-            Generate exactly {q_count} UNIQUE multiple choice quiz questions on the topic: "{clean_topic}".
+            Generate exactly {q_count} UNIQUE, UNCOMMON, and HARD multiple choice quiz questions on the topic: "{clean_topic}".
+            CRITICAL INSTRUCTION: DO NOT ask basic or common questions (like capital, formation date, basic geography, etc.). 
+            Pick rare facts, deep history, obscure personalities, or hard statistics. 
+            (System Random Seed: {random_seed} - You MUST generate completely different questions than any previous request).
+            
             Question and options MUST be Bilingual (English / Hindi). 
             Return STRICTLY a JSON array. DO NOT ADD ANY EXTRA TEXT OR MARKDOWN.
             Format:
             [ {{"id": 1, "question": "Eng / Hin?", "options": ["A / ए", "B / बी", "C / सी", "D / डी"], "answer": "A"}} ]
             """
             
-            # 🔥 NAYA FIX: Temperature 0.9 taaki har baar naye quiz questions aayein
-            res = model.generate_content(prompt, generation_config=genai.types.GenerationConfig(temperature=0.9))
+            # Temperature 1.0 = Maximum Creativity & Randomness
+            res = model.generate_content(prompt, generation_config=genai.types.GenerationConfig(temperature=1.0))
             raw = res.text.strip()
             
-            print(f"✅ AI Response Received! Length: {len(raw)} chars")
-            
-            # 🛡️ BULLETPROOF JSON EXTRACTION (Regex hata diya, ye fail nahi hoga)
+            # 🛡️ BULLETPROOF JSON EXTRACTION
             start_idx = raw.find('[')
             end_idx = raw.rfind(']')
             
             if start_idx != -1 and end_idx != -1:
                 clean_json_str = raw[start_idx:end_idx+1]
                 parsed_json = json.loads(clean_json_str)
-                print("✅ JSON Successfully Parsed!")
+                # Ensure array elements are randomly shuffled just in case
+                random.shuffle(parsed_json)
                 return {"is_typing_test": False, "questions": parsed_json, "time_per_question": q_time}
             else:
                 raise Exception("No JSON array brackets found in the AI response.")
             
     except Exception as e:
-        # 🔴 AGAR KUCH FAIL HUA, TOH YAHAN LOGS ME EXACT REASON AAYEGA
         print(f"❌ AI CRITICAL ERROR: {str(e)}")
-        
         fallback_qs = [
             {"id":1, "question":"What is the capital of India? / भारत की राजधानी क्या है?", "options":["Mumbai / मुंबई", "New Delhi / नई दिल्ली", "Kolkata / कोलकाता", "Chennai / चेन्नई"], "answer":"B"},
             {"id":2, "question":"Which planet is known as the Red Planet? / लाल ग्रह किसे कहा जाता है?", "options":["Earth / पृथ्वी", "Venus / शुक्र", "Mars / मंगल", "Jupiter / बृहस्पति"], "answer":"C"},
@@ -119,7 +117,7 @@ class GameConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def check_and_lock_questions(self, cache_key):
         if not cache.get(cache_key):
-            cache.set(cache_key, True, 60) # 60 seconds lock
+            cache.set(cache_key, True, 60)
             return True
         return False
 
