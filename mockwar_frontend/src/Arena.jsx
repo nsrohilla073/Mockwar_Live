@@ -22,7 +22,8 @@ function Arena() {
       audio.play().catch(e => console.log("Sound play error:", e));
     }
   };
-  const apiCalled = useRef(false); // 🔒 नया ताला
+  const apiCalled = useRef(false); 
+
   // 🕒 Matchmaking States
   const [maxPlayers, setMaxPlayers] = useState(2); 
   const maxPlayersRef = useRef(2); 
@@ -86,7 +87,7 @@ function Arena() {
       }
   };
 
-  // 1. Initialize Game
+  // 1. Initialize Game (Lobby me ghusna)
   useEffect(() => {
     if (!token) { navigate("/auth"); return; }
 
@@ -95,6 +96,7 @@ function Arena() {
         const profRes = await axios.get(`${API_BASE}/api/user/profile/`, { headers: { Authorization: `Bearer ${token}` } });
         myGamerTagRef.current = profRes.data.gamer_tag;
 
+        // 🔥 NAYA: API ab sirf room assign karegi, sawal nahi degi!
         const res = await axios.get(`${API_BASE}/api/game/content/${tableId}/`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -102,23 +104,11 @@ function Arena() {
         const tableLimit = res.data.max_players || 2;
         setMaxPlayers(tableLimit);
         maxPlayersRef.current = tableLimit;
+        setIsTypingMode(res.data.is_typing_test);
 
-        if (res.data.is_typing_test) {
-          setIsTypingMode(true);
-          setTargetParagraph(res.data.paragraph);
-          setTimeLeft(res.data.time_limit || 60); 
-        } else {
-          setIsTypingMode(false);
-          setQuestions(res.data.questions);
-          const qTime = res.data.time_per_question || 12;
-          setTimePerQ(qTime);
-          setTimeLeft(qTime); 
-        }
-
-        // NAYA: Backend se aayi hui room_id ko read karo
         const matchRoomId = res.data.room_id || `room_${Date.now()}`;
         
-        // NAYA: URL me tableId ke aage matchRoomId laga do
+        // WebSocket se connect ho jao us private room me
         ws.current = new WebSocket(`${WS_BASE}/ws/arena/${tableId}/${matchRoomId}/`);
         
         ws.current.onopen = () => {
@@ -128,6 +118,26 @@ function Arena() {
         ws.current.onmessage = (event) => {
             const data = JSON.parse(event.data);
             const myTag = myGamerTagRef.current;
+
+            // 🚨 THE NEW MAGIC: Jab Server ek sath sabko sawal bhej de!
+            if (data.action === 'questions_ready') {
+                if (data.content.is_typing_test) {
+                    setIsTypingMode(true);
+                    setTargetParagraph(data.content.paragraph);
+                    setTimeLeft(data.content.time_limit);
+                } else {
+                    setIsTypingMode(false);
+                    setQuestions(data.content.questions);
+                    setTimePerQ(data.content.time_per_question);
+                    setTimeLeft(data.content.time_per_question);
+                }
+                
+                // Sawal aate hi thoda wait karke Game Start kardo! (Takki dono ki screen sync rahe)
+                setTimeout(() => {
+                    setGameState("playing");
+                    typingStartTime.current = Date.now();
+                }, 1500); 
+            }
 
             if (data.action === 'score_update' && data.player && data.player !== myTag && data.player !== "Live_Player") {
                 let isNewPlayer = false;
@@ -150,12 +160,10 @@ function Arena() {
                 }
             }
 
-            // 🚨 JUDGE SYSTEM: Waiting for opponent
             if (data.action === 'waiting_for_opponent') {
                 setGameState("waiting_result");
             }
 
-            // 🚨 JUDGE SYSTEM: Final Result is here!
             if (data.action === 'match_result') {
                 handleMatchResult(data);
             }
@@ -228,13 +236,17 @@ function Arena() {
       triggerMatchFound();
   };
 
+  // 🎯 FRONTEND ORDERING BACKEND TO SEND QUESTIONS
   const triggerMatchFound = () => {
+      // Server ko order do sawal generate karne ka
+      if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+          ws.current.send(JSON.stringify({ action: 'request_questions' }));
+      }
+      
       setGameState("found");
       playSound('match-found.mp3');
-      setTimeout(() => {
-          setGameState("playing");
-          typingStartTime.current = Date.now();
-      }, 2500);
+      
+      // Note: Ab hum "playing" state me WebSocket se sawal aane ke baad jayenge, yahan se nahi!
   };
 
   // 3. GAMEPLAY & AI BOTS LOGIC
@@ -358,15 +370,14 @@ function Arena() {
 
   const handlePaste = (e) => { e.preventDefault(); };
 
-  // 4. 🚨 SEND SCORE TO REFEREE (WebSocket) - NO API HIT YET!
+  // 4. 🚨 SEND SCORE TO REFEREE
   const triggerRefereeSubmit = (finalMyPts) => {
     if (hasSubmitted.current) return;
     hasSubmitted.current = true; 
 
-    setGameState("waiting_result"); // UI Change to Loading
+    setGameState("waiting_result"); 
 
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-        // Send MY final score to Referee
         ws.current.send(JSON.stringify({
             action: 'game_finished',
             player_name: myGamerTagRef.current,
@@ -374,7 +385,6 @@ function Arena() {
             wpm: wpmRef.current
         }));
 
-        // 🤖 BOT FIX: If there are frontend bots, send their scores to referee immediately so game ends!
         opponentsRef.current.forEach(opp => {
             if (opp.isBot) {
                 ws.current.send(JSON.stringify({
@@ -388,7 +398,7 @@ function Arena() {
     }
   };
 
-  // 5. 🏆 FINALLY: REFEREE SENDS RESULT -> WE HIT API
+  // 5. 🏆 FINALLY: REFEREE SENDS RESULT
   const handleMatchResult = async (data) => {
       if (apiCalled.current) return;
       apiCalled.current = true;
@@ -407,7 +417,6 @@ function Arena() {
       if (matchStatus === 'WIN') playSound('win.mp3');
       else playSound('lose.mp3'); 
 
-      // Format Standings from Referee Data
       const finalStandings = Object.entries(data.final_scores).map(([name, stats]) => ({
           name,
           score: stats.score,
@@ -421,7 +430,6 @@ function Arena() {
       });
       setMatchStandings(finalStandings);
 
-      // 💰 Hit Submit API only after result is declared!
       try {
           const res = await axios.post(`${API_BASE}/api/game/submit-result/`, { 
               table_id: tableId,
@@ -453,7 +461,6 @@ function Arena() {
       {/* 🔍 THE WAITING ROOM */}
       {gameState === "searching" && (
         <div className="flex flex-col items-center space-y-8 animate-fade-in z-10 w-full max-w-sm">
-          {/* ... (Existing code kept unchanged) */}
           <div className="text-center">
             <h1 className="text-2xl font-black tracking-widest text-slate-200 uppercase bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">Securing Arena</h1>
             <p className="text-xs text-blue-400 font-bold uppercase tracking-widest mt-1.5 flex items-center justify-center gap-1.5">
@@ -509,6 +516,7 @@ function Arena() {
             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-2 flex items-center justify-center gap-1.5">
                <Users size={12}/> {opponents.length + 1} Warriors Ready
             </p>
+            <p className="mt-6 text-sm text-yellow-500 font-black uppercase tracking-widest animate-pulse">Generating Map & Arena...</p>
           </div>
         </div>
       )}
@@ -516,7 +524,6 @@ function Arena() {
       {/* 🎮 LIVE GAME PLAYING */}
       {gameState === "playing" && (
         <div className="w-full max-w-xl animate-fade-in space-y-5 z-10">
-          {/* ... (Existing Playing code kept unchanged) */}
           <div className="space-y-3 bg-slate-900/80 backdrop-blur-md border border-slate-800 p-4 rounded-3xl shadow-[0_0_30px_rgba(0,0,0,0.5)]">
               <div className="flex justify-center -mt-8 mb-2">
                  <div className="bg-slate-950 px-6 py-2 rounded-2xl border border-yellow-500/30 flex items-center gap-2 shadow-[0_10px_20px_rgba(0,0,0,0.4)] relative overflow-hidden">
@@ -578,27 +585,22 @@ function Arena() {
                 onClick={() => document.getElementById('hidden-typer')?.focus()}
               >
                 
-                {/* Active Focus Glow (जब टाइपिंग कर रहे हों) */}
                 <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-focus-within:opacity-100 transition-opacity pointer-events-none"></div>
 
-                {/* Rendered Text with Live Cursor */}
                 <div className="text-xl md:text-3xl leading-relaxed md:leading-loose font-mono tracking-wide text-left relative z-10 pointer-events-none flex flex-wrap">
                   {targetParagraph.split("").map((char, index) => {
-                    let charStyle = "text-slate-600"; // डिफ़ॉल्ट (जो अभी टाइप नहीं हुआ)
+                    let charStyle = "text-slate-600";
                     let cursorStyle = "";
 
                     if (index < typedText.length) {
-                      // जो अक्षर टाइप हो चुके हैं
                       charStyle = typedText[index] === char 
-                        ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.4)]" // सही 
-                        : "text-red-400 bg-red-500/20 rounded-sm border-b-4 border-red-500"; // गलत
+                        ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.4)]" 
+                        : "text-red-400 bg-red-500/20 rounded-sm border-b-4 border-red-500"; 
                     } else if (index === typedText.length) {
-                      // 🌟 THE CURRENT CHARACTER (जहाँ कर्सर है)
                       charStyle = "text-slate-100 font-bold drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]";
                       cursorStyle = "border-l-[3px] border-blue-500 animate-pulse bg-blue-500/20 rounded-r-sm";
                     }
 
-                    // स्पेस (Space) को सही से दिखाने के लिए \u00A0 का इस्तेमाल
                     const displayChar = char === " " ? "\u00A0" : char; 
 
                     return (
@@ -609,16 +611,12 @@ function Arena() {
                   })}
                 </div>
                 
-                {/* Hidden Textarea (यह दिखेगा नहीं, लेकिन मोबाइल कीबोर्ड इसी से आएगा) */}
                 <textarea
                   id="hidden-typer"
                   autoFocus
                   value={typedText}
                   onChange={(e) => {
-                      // टेक्स्ट को टारगेट पैराग्राफ से लंबा नहीं होने देगा
-                      if (e.target.value.length <= targetParagraph.length) {
-                          handleTypingChange(e);
-                      }
+                      if (e.target.value.length <= targetParagraph.length) handleTypingChange(e);
                   }}
                   onPaste={handlePaste}
                   onCopy={(e) => e.preventDefault()}
@@ -636,7 +634,7 @@ function Arena() {
         </div>
       )}
 
-      {/* ⏳ NEW: WAITING FOR OPPONENT SCREEN */}
+      {/* ⏳ WAITING FOR OPPONENT SCREEN */}
       {gameState === "waiting_result" && (
         <div className="flex flex-col items-center justify-center space-y-6 animate-fade-in z-10 w-full max-w-sm text-center">
             <Loader2 size={60} className="animate-spin text-blue-500 mb-4" />
@@ -648,7 +646,6 @@ function Arena() {
       {/* 🏆 LEADERBOARD & TRANSPARENCY SCREEN */}
       {gameState === "finished" && (
         <div className="w-full max-w-md space-y-6 z-10 animate-scale-up">
-          {/* ... (Existing Result Screen kept unchanged) */}
           <div className="bg-slate-900/90 backdrop-blur-xl p-6 rounded-[2rem] border border-slate-700 text-center shadow-[0_0_50px_rgba(0,0,0,0.5)]">
              <Trophy size={60} className={`${matchReward > 0 && myPoints > 0 ? "text-emerald-400 drop-shadow-[0_0_20px_rgba(52,211,153,0.4)]" : "text-red-400 drop-shadow-[0_0_20px_rgba(248,113,113,0.4)]"} mb-3`} />
              <h1 className={`text-3xl font-black tracking-tight mb-4 uppercase ${matchReward > 0 ? "text-emerald-400" : matchStandings[0]?.score === myPoints ? "text-yellow-400" : "text-red-500"}`}>

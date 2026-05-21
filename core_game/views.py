@@ -444,138 +444,37 @@ class GetGameContentAPIView(APIView):
 
     def get(self, request, category_slug):
         try:
-            print(f"🚀 Matchmaking started for: {category_slug}")
+            table = GameTable.objects.filter(category__name__iexact=category_slug.replace('-', ' ')).first()
+            if not table: table = GameTable.objects.first()
             
-            table = None
-            for t in GameTable.objects.filter(is_live=True):
-                if t.category.name.lower().replace(' ', '-') == category_slug:
-                    table = t
-                    break
+            max_players = table.max_players
             
-            max_players = table.max_players if table else 2
-            q_count = table.questions_count if table else 5
-            q_time = table.time_per_question if table else 12
-            is_typing = 'typing' in category_slug.lower()
-
             # ==========================================
-            # 1. MATCHMAKING FIRST (CHECK QUEUE)
+            # 🎯 LOBBY MATCHMAKING (SIRF ROOM ASSIGN HOGA)
             # ==========================================
             match_queue_key = f"match_queue_{category_slug}"
             queue_data = cache.get(match_queue_key)
             
             if queue_data:
-                # 🎮 PLAYER 2+ AAYA: Jo room pehle bana hai, usme ghusao
                 room_id = queue_data['room_id']
                 queue_data['player_count'] += 1
-                
                 if queue_data['player_count'] >= max_players:
-                    cache.delete(match_queue_key)  # Room Full
+                    cache.delete(match_queue_key)  # Room Full!
                 else:
                     cache.set(match_queue_key, queue_data, timeout=65)
-                
-                # 🔥 SABSE BADA FIX: Player 2 ko wahi sawal do jo is Room ke liye P1 ne banaye the
-                room_content_key = f"content_{room_id}"
-                game_data = cache.get(room_content_key)
-                
-                # Agar kisi wajah se room cache clear ho jaye (rare case) toh fallback do
-                if not game_data:
-                    game_data = {"is_typing_test": False, "questions": [{"id": 1, "question": "Are you ready? / क्या आप तैयार हैं?", "options": ["Yes", "No", "Maybe", "Okay"], "answer": "A"}], "time_per_question": q_time, "max_players": max_players}
-                    if is_typing: game_data = {"is_typing_test": True, "paragraph": "The match is starting now. Show your speed.", "time_limit": 60, "max_players": max_players}
+            else:
+                room_id = f"room_{int(time.time())}_{random.randint(1000, 9999)}"
+                if max_players > 1:
+                    cache.set(match_queue_key, {"room_id": room_id, "player_count": 1}, timeout=65)
 
-                game_data['room_id'] = room_id
-                return Response(game_data, status=status.HTTP_200_OK)
-
-            # ==========================================
-            # 2. PLAYER 1 AAYA (CREATE NEW ROOM & CONTENT)
-            # ==========================================
-            room_id = f"room_{int(time.time())}_{random.randint(1000, 9999)}"
-            room_content_key = f"content_{room_id}"
-            
-            # API bachane ke liye hum questions ko sirf 10 seconds cache me rakhenge.
-            # Taki agar 500 log ek sath aaye toh API 1 baar hit ho, par agla match khelne par Naye Qs aayein.
-            global_cache_key = f"global_content_{category_slug}"
-            global_lock_key = f"{global_cache_key}_lock"
-            
-            game_data = cache.get(global_cache_key)
-            
-            if not game_data:
-                lock_acquired = cache.add(global_lock_key, "locked", timeout=15)
-                if not lock_acquired:
-                    print("⏳ Waiting for other player to fetch AI...")
-                    for _ in range(15):
-                        time.sleep(1)
-                        game_data = cache.get(global_cache_key)
-                        if game_data: break
-                
-                if not game_data:
-                    print("🤖 Generating fresh AI Content...")
-                    try:
-                        if not hasattr(settings, 'GEMINI_API_KEY') or settings.GEMINI_API_KEY == "YAHAN_APNI_GOOGLE_GEMINI_API_KEY_DAALO":
-                            raise Exception("GEMINI_API_KEY missing")
-
-                        genai.configure(api_key=settings.GEMINI_API_KEY)
-                        
-                        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                        target_model_name = 'models/gemini-pro'
-                        for name in available_models:
-                            if 'gemini-1.5-flash' in name: target_model_name = name; break
-                            elif 'gemini-pro' in name and 'vision' not in name: target_model_name = name
-
-                        model = genai.GenerativeModel(target_model_name)
-                        
-                        if is_typing:
-                            topics = ["Space Exploration", "Deep Ocean Secrets", "Cybersecurity", "Ancient Indian History", "Artificial Intelligence"]
-                            rnd_topic = random.choice(topics)
-                            prompt = f"Generate a highly engaging, unique single paragraph of exactly 40 words about '{rnd_topic}' for an English typing speed test tournament. Do NOT use markdown, quotes, or special symbols. Just plain text."
-                            response = model.generate_content(prompt, generation_config=genai.types.GenerationConfig(temperature=0.9))
-                            ai_paragraph = response.text.strip().replace('\n', ' ').replace('"', '').replace("'", "")
-                            game_data = {"is_typing_test": True, "paragraph": ai_paragraph, "time_limit": 60, "max_players": max_players}
-                        else:
-                            clean_topic = table.category.name if table else category_slug.replace('-', ' ').title()
-                            random_seed = random.randint(100000, 999999)
-                            prompt = f"""
-                            Generate exactly {q_count} completely UNIQUE, UNCOMMON, and HARD multiple choice quiz questions on the strict main topic: "{clean_topic}".
-                            CRITICAL INSTRUCTION: The questions MUST be a "MIXED BAG". Ensure that EACH of the {q_count} questions is from a DIFFERENT sub-category. (System Random Seed: {random_seed}).
-                            CRITICAL RULE: The question text and ALL 4 options MUST be Bilingual (English followed by Hindi translation separated by a slash '/'). 
-                            Return STRICTLY a valid JSON array of objects. Do NOT use markdown format.
-                            Format exactly like this:
-                            [
-                                {{"id": 1, "question": "Eng / Hin?", "options": ["A / ए", "B / बी", "C / सी", "D / डी"], "answer": "A"}}
-                            ]
-                            """
-                            response = model.generate_content(prompt, generation_config=genai.types.GenerationConfig(temperature=0.9))
-                            raw_text = response.text.strip()
-                            if "```json" in raw_text: raw_text = raw_text.split("```json")[1].split("```")[0].strip()
-                            elif "```" in raw_text: raw_text = raw_text.split("```")[1].split("```")[0].strip()
-
-                            ai_questions = json.loads(raw_text)
-                            game_data = {"is_typing_test": False, "questions": ai_questions, "time_per_question": q_time, "max_players": max_players}
-
-                    except Exception as ai_error:
-                        print(f"⚠️ AI Quota/Error. Fallback active: {ai_error}")
-                        if is_typing: game_data = {"is_typing_test": True, "paragraph": "The quick brown fox jumps over the lazy dog.", "time_limit": 60, "max_players": max_players}
-                        else: game_data = {"is_typing_test": False, "questions": [{"id": 1, "question": "Test? / टेस्ट?", "options": ["A", "B", "C", "D"], "answer": "A"}], "time_per_question": q_time, "max_players": max_players}
-
-                    # 🔥 Global Cache sirf 10 second ke liye! (API bachane aur nayi generation ke liye)
-                    cache.set(global_cache_key, game_data, timeout=10)
-                    cache.delete(global_lock_key)
-
-            # 🔥 P1 ne jo generate kiya, usko Room Id se jod kar 5 minute ke liye save kar lo.
-            # Taki P2 jab aaye, usko same sawal hi mile!
-            cache.set(room_content_key, game_data, timeout=300)
-            
-            # Queue bana do
-            if max_players > 1:
-                cache.set(match_queue_key, {"room_id": room_id, "player_count": 1}, timeout=65)
-
-            response_data = game_data.copy()
-            response_data['room_id'] = room_id
-            return Response(response_data, status=status.HTTP_200_OK)
+            return Response({
+                "room_id": room_id,
+                "max_players": max_players,
+                "is_typing_test": 'typing' in category_slug.lower()
+            }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            import traceback
-            traceback.print_exc() 
-            return Response({"error": f"Internal Error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 # ==========================================
 # 7. SUBMIT GAME RESULT & REWARD LOGIC
 # ==========================================
