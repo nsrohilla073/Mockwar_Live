@@ -43,6 +43,10 @@ export default function Arena({ route, navigation }) {
   const [matchReward, setMatchReward] = useState(0); 
   const [matchStatus, setMatchStatus] = useState(''); 
 
+  // 🌟 NAYA: Web Jaisa Accuracy Review aur Secure Validation
+  const [userAnswers, setUserAnswers] = useState([]);
+  const matchRoomIdRef = useRef(""); 
+
   const [questions, setQuestions] = useState([]);
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [targetParagraph, setTargetParagraph] = useState("");
@@ -134,6 +138,8 @@ export default function Arena({ route, navigation }) {
         setIsTypingMode(res.data.is_typing_test);
 
         const matchRoomId = res.data.room_id || `room_${Date.now()}`;
+        matchRoomIdRef.current = matchRoomId; // 🔴 SECURE FIX: Store Room ID for validation
+
         ws.current = new WebSocket(`${WS_BASE}/ws/arena/${tableId}/${matchRoomId}/`);
         ws.current.onopen = () => { sendMyScore(0); };
 
@@ -209,12 +215,28 @@ export default function Arena({ route, navigation }) {
       }
   }, [opponents.length, gameState, maxPlayers]);
 
+  // 🌟 NAYA: Web Jaisa Smart Bot Name Generator
+  const generateBotName = () => {
+      const firstNames = ["Rahul", "Neha", "Vikas", "Priya", "Aman", "Rohit", "Pooja", "Sonu", "Monu", "Jaat", "Desi", "Gamer", "Pro", "Ninja", "King", "Queen", "Ankit", "Komal"];
+      const suffixes = ["OP", "Pro", "Kill", "Sniper", "Don", "Hry", "Boy", "Girl", "Boss", "007", "X", "Max", "YT"];
+      
+      const type = Math.floor(Math.random() * 3); 
+      const fName = firstNames[Math.floor(Math.random() * firstNames.length)];
+      
+      if (type === 0) return `${fName}${Math.floor(100 + Math.random() * 9000)}`; 
+      else if (type === 1) return `${fName}_${suffixes[Math.floor(Math.random() * suffixes.length)]}`; 
+      else return `${fName}${Math.floor(10 + Math.random() * 90)}`; 
+  };
+
   const fillWithBotsAndStart = () => {
       updateOpponents(prev => {
           let newOpp = [...prev];
           while (newOpp.length < maxPlayersRef.current - 1) {
-              const names = ["Rahul_OP", "Neha_Pro", "Vikas_Hry", "Priya_Don", "Aman_YT", "Sniper_007"];
-              newOpp.push({ name: names[Math.floor(Math.random() * names.length)], score: 0, isBot: true });
+              let newName = generateBotName();
+              while(newOpp.some(o => o.name === newName) || newName === myGamerTagRef.current) {
+                  newName = generateBotName();
+              }
+              newOpp.push({ name: newName, score: 0, isBot: true });
           }
           return newOpp;
       });
@@ -255,6 +277,7 @@ export default function Arena({ route, navigation }) {
     }
   }, [gameState, timeLeft, isTypingMode]);
 
+  // 🌟 NAYA: Web jaisa Accuracy Data collect karna
   const handleAnswerClick = (selectedOption) => {
     const currentQ = questions[currentQIndex];
     const dbAnswer = currentQ.answer.toUpperCase().trim();
@@ -268,13 +291,34 @@ export default function Arena({ route, navigation }) {
     else playSound('wrong.mp3');
 
     const earnedPoints = isCorrect ? (10 + timeLeft) : 0; 
+    
+    // Save answer for review UI
+    setUserAnswers(prev => [...prev, { 
+      question: currentQ.question, 
+      userAnswer: selectedOption, 
+      correctAnswer: currentQ.options[["A", "B", "C", "D"].indexOf(dbAnswer)],
+      isCorrect: isCorrect 
+    }]);
+
     const updatedMyPoints = myPoints + earnedPoints;
     setMyPoints(updatedMyPoints);
     sendMyScore(updatedMyPoints); 
-    handleNextQuestion(updatedMyPoints);
+    handleNextQuestion(updatedMyPoints, selectedOption);
   };
 
-  const handleNextQuestion = (finalMyPoints) => {
+  const handleNextQuestion = (finalMyPoints, selectedOption = null) => {
+    // Agar time out ho gaya
+    if (!selectedOption && !isTypingMode && questions.length > 0) {
+        playSound('wrong.mp3'); 
+        const currentQ = questions[currentQIndex];
+        setUserAnswers(prev => [...prev, { 
+            question: currentQ.question, 
+            userAnswer: "Time Out", 
+            correctAnswer: currentQ.options[["A", "B", "C", "D"].indexOf(currentQ.answer)],
+            isCorrect: false 
+        }]);
+    }
+
     if (currentQIndex + 1 < questions.length) {
       setCurrentQIndex(currentQIndex + 1);
       setTimeLeft(timePerQ); 
@@ -321,7 +365,7 @@ export default function Arena({ route, navigation }) {
     }
   };
 
-  // 🚀 5. FINAL RESULTS API
+  // 🚀 5. FINAL RESULTS API (SECURE FIX)
   const handleMatchResult = async (data) => {
       if (apiCalled.current) return;
       apiCalled.current = true;
@@ -352,9 +396,12 @@ export default function Arena({ route, navigation }) {
 
       try {
           const token = await AsyncStorage.getItem('access_token');
+          // 🔴 SECURE FIX: Only send table_id & room_id. Backend will verify score from cache.
           const res = await axios.post(`${API_BASE}/api/game/submit-result/`, { 
-              table_id: tableId, score: data.final_scores[myTag].score, wpm: data.final_scores[myTag].wpm, accuracy: accuracyRef.current, status: cStatus
+              table_id: tableId, 
+              room_id: matchRoomIdRef.current 
           }, { headers: { Authorization: `Bearer ${token}` } });
+          
           setMatchReward(res.data.prize_won || 0); 
       } catch (error) {
           console.error("Submission Error:", error);
@@ -487,7 +534,7 @@ export default function Arena({ route, navigation }) {
       )}
 
       {gameState === 'finished' && (
-        <View style={styles.centerContent}>
+        <ScrollView contentContainerStyle={{flexGrow: 1, justifyContent: 'center', paddingVertical: 40}} showsVerticalScrollIndicator={false}>
           <View style={styles.resultCard}>
             <Trophy size={60} color={matchStatus === 'WIN' ? "#34d399" : matchStatus === 'DRAW' ? "#facc15" : "#ef4444"} style={{ alignSelf: 'center', marginBottom: 10 }} />
             <Text style={[styles.resultTitleWin, {color: matchStatus === 'WIN' ? "#34d399" : matchStatus === 'DRAW' ? "#facc15" : "#ef4444"}]}>
@@ -516,8 +563,25 @@ export default function Arena({ route, navigation }) {
             <TouchableOpacity style={styles.returnBtn} onPress={() => navigation.navigate('Lobby')} disabled={apiLoading}>
               <Text style={styles.returnBtnText}>{apiLoading ? "SAVING..." : "RETURN TO LOBBY"}</Text>
             </TouchableOpacity>
+
+            {/* 🌟 NAYA: Web Jaisa Quiz Accuracy Review */}
+            {!isTypingMode && userAnswers.length > 0 && (
+              <View style={styles.reviewContainer}>
+                <Text style={styles.reviewHeader}>🎯 QUIZ ACCURACY REVIEW</Text>
+                {userAnswers.map((ans, idx) => (
+                  <View key={idx} style={[styles.reviewBox, ans.isCorrect ? styles.reviewBoxCorrect : styles.reviewBoxWrong]}>
+                    <Text style={styles.reviewQuestion}>{idx + 1}. {ans.question}</Text>
+                    <Text style={styles.reviewAnswer}>Your Answer: <Text style={ans.isCorrect ? styles.correctText : styles.wrongText}>{ans.userAnswer}</Text></Text>
+                    {!ans.isCorrect && (
+                      <Text style={styles.reviewCorrectAnswer}>Correct Answer: {ans.correctAnswer}</Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+
           </View>
-        </View>
+        </ScrollView>
       )}
     </View>
   );
@@ -586,5 +650,17 @@ const styles = StyleSheet.create({
   youTag: { color: '#60a5fa', fontSize: 8, backgroundColor: 'rgba(59,130,246,0.1)', paddingHorizontal: 4, overflow: 'hidden', borderRadius: 4 },
   lbScore: { color: '#34d399', fontWeight: '900', fontFamily: 'monospace', fontSize: 16 },
   returnBtn: { backgroundColor: '#2563eb', padding: 18, borderRadius: 16, alignItems: 'center' },
-  returnBtnText: { color: '#fff', fontWeight: '900', letterSpacing: 1 }
+  returnBtnText: { color: '#fff', fontWeight: '900', letterSpacing: 1 },
+
+  // 🌟 NAYA STYLES: Accuracy Review UI
+  reviewContainer: { marginTop: 25, width: '100%' },
+  reviewHeader: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', textAlign: 'center', marginBottom: 15, letterSpacing: 1 },
+  reviewBox: { padding: 15, borderRadius: 16, borderWidth: 1, marginBottom: 10 },
+  reviewBoxCorrect: { backgroundColor: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.3)' },
+  reviewBoxWrong: { backgroundColor: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.3)' },
+  reviewQuestion: { color: '#f1f5f9', fontSize: 14, fontWeight: 'bold', marginBottom: 10 },
+  reviewAnswer: { color: '#94a3b8', fontSize: 12 },
+  correctText: { color: '#34d399', fontWeight: 'bold' },
+  wrongText: { color: '#ef4444', fontWeight: 'bold' },
+  reviewCorrectAnswer: { color: '#34d399', fontSize: 12, fontWeight: 'bold', marginTop: 4 }
 });

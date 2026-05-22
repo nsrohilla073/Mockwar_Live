@@ -37,6 +37,23 @@ export default function Lobby({ navigation }) {
   const [leaderboardCategory, setLeaderboardCategory] = useState(null);
   const [isClaiming, setIsClaiming] = useState(false);
 
+  // 🌟 NAYA: Web jaisa Ticker aur Slider States
+  const [tickerIndex, setTickerIndex] = useState(0);
+  const [currentSlide, setCurrentSlide] = useState(0);
+
+  const tickerItems = [
+    `🏆 ${profileData.gamer_tag || 'Player'} just entered the Arena!`,
+    "⚡ Neha_Kill withdrew ₹1,200 instantly via UPI.",
+    "🔥 Vikas_OP joined Elite Typing Battle.",
+    "💰 Mega Tournament Prize Pool reached ₹1,00,000!"
+  ];
+
+  const promoSlides = [
+    { title: "WELCOME TO MOCKWAR", desc: "India's Premium Esports Speed & Skill Arena.", color1: '#2563eb', color2: '#4f46e5' },
+    { title: "INSTANT WITHDRAWALS", desc: "100% Safe & Secure. Transfer winnings via UPI.", color1: '#059669', color2: '#0f766e' },
+    { title: "PROVE YOUR SKILLS", desc: "Dominate Live Quizzes & Typing Battles!", color1: '#9333ea', color2: '#db2777' }
+  ];
+
   const fetchDashboardData = async () => {
     try {
       const token = await AsyncStorage.getItem('access_token');
@@ -72,9 +89,31 @@ export default function Lobby({ navigation }) {
     fetchDashboardData();
   }, [currentView]);
 
-  const handlePlayGame = (entryFee, tableId) => {
+  // 🌟 NAYA: Slider aur Ticker ka Timer
+  useEffect(() => {
+    if (currentView !== 'lobby') return;
+    const tickerInterval = setInterval(() => setTickerIndex(prev => (prev + 1) % tickerItems.length), 3500);
+    const slideInterval = setInterval(() => setCurrentSlide(prev => (prev + 1) % promoSlides.length), 4000);
+    
+    return () => {
+      clearInterval(tickerInterval);
+      clearInterval(slideInterval);
+    };
+  }, [currentView, profileData]);
+
+  // 🔴 SECURE FIX: Frontend se paise deduct nahi honge, server table_id se khud deduct karega
+  const handlePlayGame = async (entryFee, tableId) => {
     if (walletBalance >= entryFee) {
-      navigation.navigate('Arena', { tableId: tableId });
+      try {
+        const token = await AsyncStorage.getItem('access_token');
+        const response = await axios.post(`${API_BASE}/api/game/play/`, { table_id: tableId }, { headers: { Authorization: `Bearer ${token}` } });
+        
+        if (response.data.success) {
+          navigation.navigate('Arena', { tableId: tableId });
+        }
+      } catch (error) {
+        Alert.alert("Hold On!", error.response?.data?.error || "Could not process entry fee. Try again.");
+      }
     } else {
       Alert.alert("Low Balance", `You need ₹${entryFee} to play. Please add cash.`);
     }
@@ -338,15 +377,17 @@ export default function Lobby({ navigation }) {
           {/* ===================== LOBBY / ARENA TAB ===================== */}
           {currentView === 'lobby' && (
             <View>
+              {/* 🌟 Web Jaisa Dynamic Ticker */}
               <View style={styles.tickerBox}>
                 <View style={styles.liveBadge}><Text style={styles.liveText}>LIVE</Text></View>
-                <Text style={styles.tickerText}>🏆 {profileData.gamer_tag} just entered the Arena!</Text>
+                <Text style={styles.tickerText}>{tickerItems[tickerIndex]}</Text>
               </View>
 
-              <LinearGradient colors={['#2563eb', '#4f46e5']} style={styles.promoBanner}>
+              {/* 🌟 Web Jaisa Auto Sliding Banner */}
+              <LinearGradient colors={[promoSlides[currentSlide].color1, promoSlides[currentSlide].color2]} style={styles.promoBanner}>
                 <Text style={styles.promoTag}>FEATURED</Text>
-                <Text style={styles.promoTitle}>WELCOME {profileData.gamer_tag}</Text>
-                <Text style={styles.promoDesc}>India's Premium Esports Speed & Skill Arena.</Text>
+                <Text style={styles.promoTitle}>{promoSlides[currentSlide].title}</Text>
+                <Text style={styles.promoDesc}>{promoSlides[currentSlide].desc}</Text>
                 <Swords size={40} color="rgba(255,255,255,0.2)" style={{ position: 'absolute', right: -5, bottom: -5 }} />
               </LinearGradient>
 

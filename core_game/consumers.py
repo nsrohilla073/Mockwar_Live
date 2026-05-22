@@ -162,26 +162,41 @@ class GameConsumer(AsyncWebsocketConsumer):
     def delete_cache(self, key): cache.delete(key)
 
     async def process_game_finish(self, player_name, final_score, wpm):
+        # 🔴 FIX 3: ANTI-CHEAT VALIDATION (God-Mode Hacker Block)
+        # Agar hacker ne frontend se cheat karke impossible score bheja, toh usko 0 kar do
+        if wpm > 250: 
+            final_score = 0
+            wpm = 0
+        if final_score > 5000: # Quiz mein itna score possible nahi hai
+            final_score = 0
 
         table_max_players = await self.get_table_max_players(self.table_id)
-
         cache_key = f"match_state_{self.room_group_name}"
         state = await self.get_cache(cache_key)
+        
         if not state: state = {'players': {}}
         
-        # Player ka score update karo
         state['players'][player_name] = {'score': final_score, 'wpm': wpm}
         await self.set_cache(cache_key, state, 120)
 
-        # Draw aur Winner ka logic
         if len(state['players']) >= table_max_players:
             sorted_players = sorted(state['players'].items(), key=lambda x: (x[1]['score'], x[1]['wpm']), reverse=True)
-
             top_score = sorted_players[0][1]['score']
             top_wpm = sorted_players[0][1]['wpm']
 
             winners = [name for name, data in sorted_players if data['score'] == top_score and data['wpm'] == top_wpm]
             losers = [name for name, data in sorted_players if name not in winners]
+            is_draw = (len(winners) == table_max_players)
+
+            result_cache_key = f"match_result_{self.room_group_name}"
+            final_result_data = {
+                "winners": winners,
+                "losers": losers,
+                "is_draw": is_draw,
+                "players": state['players'],
+                "claimed_users": [] # Track who took the money
+            }
+            await self.set_cache(result_cache_key, final_result_data, 300) 
 
             await self.channel_layer.group_send(
                 self.room_group_name, 
@@ -190,13 +205,10 @@ class GameConsumer(AsyncWebsocketConsumer):
                     'action': 'match_result', 
                     'winners': winners, 
                     'losers': losers, 
-                    'is_draw': len(winners) == table_max_players, 
+                    'is_draw': is_draw, 
                     'final_scores': state['players']
                 }
             )
             await self.delete_cache(cache_key)
         else:
-            await self.send(text_data=json.dumps({'action': 'waiting_for_opponent', 'message': f"Waiting for others... ({len(state['players'])}/{table_max_players})"}))
-
-    async def game_message(self, event):
-        await self.send(text_data=json.dumps(event))
+            await self.send(text_data=json.dumps({'action': 'waiting_for_opponent', 'message': f"Waiting for others..."}))

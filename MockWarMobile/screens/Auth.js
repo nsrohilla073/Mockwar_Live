@@ -4,14 +4,30 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Image, ActivityIndicator } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Smartphone, Mail, ShieldCheck, User, CalendarDays, Zap, Camera } from 'lucide-react-native';
+import { Smartphone, Mail, ShieldCheck, User, CalendarDays, Zap, Camera, Gift } from 'lucide-react-native';
 import axios from 'axios';
+import { Picker } from '@react-native-picker/picker'; // 🔴 NAYA: State/District Dropdown ke liye
 
 // 🔥 NATIVE FIREBASE IMPORTS
 import auth from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 const API_BASE = "https://mockwar-backend.onrender.com";
+
+// 🔴 NAYA: INDIA STATES LIST (Web wali list copy ki)
+const INDIA_STATES = {
+  "Andhra Pradesh": ["Anantapur", "Chittoor", "Visakhapatnam", "Vijayawada", "Guntur", "Nellore", "Tirupati"],
+  "Bihar": ["Patna", "Gaya", "Bhagalpur", "Muzaffarpur", "Purnia", "Darbhanga", "Arrah", "Begusarai"],
+  "Delhi": ["Central Delhi", "New Delhi", "North Delhi", "South Delhi", "West Delhi", "East Delhi"],
+  "Gujarat": ["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Bhavnagar", "Jamnagar", "Gandhinagar"],
+  "Haryana": ["Gurugram", "Faridabad", "Panipat", "Ambala", "Rohtak", "Hisar", "Karnal", "Sonipat"],
+  "Karnataka": ["Bengaluru", "Mysuru", "Hubli", "Mangaluru", "Belagavi", "Davangere", "Ballari"],
+  "Maharashtra": ["Mumbai", "Pune", "Nagpur", "Thane", "Nashik", "Aurangabad", "Solapur"],
+  "Punjab": ["Ludhiana", "Amritsar", "Jalandhar", "Patiala", "Bathinda", "Mohali", "Pathankot"],
+  "Rajasthan": ["Jaipur", "Jodhpur", "Kota", "Bikaner", "Ajmer", "Udaipur", "Bhilwara", "Alwar"],
+  "Uttar Pradesh": ["Lucknow", "Kanpur", "Ghaziabad", "Agra", "Varanasi", "Meerut", "Prayagraj", "Noida"],
+  "West Bengal": ["Kolkata", "Howrah", "Durgapur", "Asansol", "Siliguri", "Darjeeling", "Kharagpur"]
+}; // Aap yahan poori list daal sakte hain
 
 export default function Auth({ navigation }) {
   const [loginMethod, setLoginMethod] = useState('phone'); 
@@ -22,9 +38,9 @@ export default function Auth({ navigation }) {
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   
-  // Naya Native OTP Confirmation state
   const [confirm, setConfirm] = useState(null);
 
+  // 🔴 NAYA: referred_by add kiya regData me
   const [regData, setRegData] = useState({ name: '', dob: '', state: '', district: '', uid: '', phone: '', email: '', live_photo: '', referred_by: '' });
 
   const [permission, requestPermission] = useCameraPermissions();
@@ -54,7 +70,6 @@ export default function Auth({ navigation }) {
     }
   };
 
-  // 🟢 NATIVE GOOGLE LOGIN
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
@@ -75,7 +90,6 @@ export default function Auth({ navigation }) {
     }
   };
 
-  // 📱 NATIVE PHONE OTP (No Captcha)
   const sendOTP = async () => {
     if (phone.length !== 10) return Alert.alert("Error", "Enter valid 10-digit number");
     setLoading(true);
@@ -124,6 +138,7 @@ export default function Auth({ navigation }) {
 
   const handleRegistrationSubmit = async () => {
     if (!regData.live_photo) return Alert.alert("Hold On!", "Please capture KYC Live Photo.");
+    if (!regData.state || !regData.district) return Alert.alert("Hold On!", "Please select your State and District.");
     if (loginMethod === 'google' && !regData.phone) return Alert.alert("Hold On!", "Phone number is mandatory.");
     
     setLoading(true);
@@ -168,9 +183,44 @@ export default function Auth({ navigation }) {
 
               <View style={styles.inputWrapper}><CalendarDays size={20} color="#64748b" style={styles.icon} /><TextInput style={styles.input} placeholder="DOB (YYYY-MM-DD)" placeholderTextColor="#64748b" onChangeText={(val) => setRegData({...regData, dob: val})} /></View>
             
-              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 15 }}>
-                <View style={[styles.inputWrapper, { flex: 1, marginBottom: 0 }]}><TextInput style={styles.input} placeholder="State" placeholderTextColor="#64748b" onChangeText={(val) => setRegData({...regData, state: val})} /></View>
-                <View style={[styles.inputWrapper, { flex: 1, marginBottom: 0 }]}><TextInput style={styles.input} placeholder="District" placeholderTextColor="#64748b" onChangeText={(val) => setRegData({...regData, district: val})} /></View>
+              {/* 🔴 NAYA: State & District Dropdown for APK */}
+              <View style={{ marginBottom: 15, gap: 10 }}>
+                <View style={styles.pickerWrapper}>
+                  <Picker
+                    selectedValue={regData.state}
+                    style={styles.picker}
+                    dropdownIconColor="#64748b"
+                    onValueChange={(itemValue) => setRegData({...regData, state: itemValue, district: ''})}
+                  >
+                    <Picker.Item label="Select State" value="" color="#64748b" />
+                    {Object.keys(INDIA_STATES).map(state => <Picker.Item key={state} label={state} value={state} color="#fff" />)}
+                  </Picker>
+                </View>
+
+                <View style={[styles.pickerWrapper, !regData.state && { opacity: 0.5 }]}>
+                  <Picker
+                    selectedValue={regData.district}
+                    style={styles.picker}
+                    dropdownIconColor="#64748b"
+                    enabled={!!regData.state}
+                    onValueChange={(itemValue) => setRegData({...regData, district: itemValue})}
+                  >
+                    <Picker.Item label="Select District" value="" color="#64748b" />
+                    {regData.state && INDIA_STATES[regData.state].map(dist => <Picker.Item key={dist} label={dist} value={dist} color="#fff" />)}
+                  </Picker>
+                </View>
+              </View>
+
+              {/* 🔴 NAYA: Referral Code Input for APK */}
+              <View style={styles.inputWrapper}>
+                <Gift size={20} color="#f59e0b" style={styles.icon} />
+                <TextInput 
+                  style={styles.input} 
+                  placeholder="Referral Code (Optional)" 
+                  placeholderTextColor="#64748b" 
+                  autoCapitalize="characters"
+                  onChangeText={(val) => setRegData({...regData, referred_by: val.toUpperCase()})} 
+                />
               </View>
 
               <View style={styles.cameraBox}>
@@ -267,6 +317,11 @@ const styles = StyleSheet.create({
   prefixBox: { backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#1e293b', borderRadius: 12, paddingHorizontal: 20, justifyContent: 'center', alignItems: 'center' },
   prefixText: { color: '#64748b', fontWeight: '900', fontSize: 16 },
   input: { color: '#fff', fontSize: 16, fontWeight: 'bold', flex: 1 },
+  
+  // 🔴 NAYA: Picker Styles
+  pickerWrapper: { backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#1e293b', borderRadius: 12, height: 55, justifyContent: 'center' },
+  picker: { color: '#fff' },
+
   otpInput: { backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#1e293b', borderRadius: 12, color: '#fff', fontSize: 32, fontWeight: '900', textAlign: 'center', letterSpacing: 10, paddingVertical: 15 },
   submitBtn: { paddingVertical: 18, borderRadius: 16, alignItems: 'center', justifyContent: 'center', shadowColor: '#3b82f6', shadowOpacity: 0.4, shadowRadius: 10 },
   btnText: { color: '#fff', fontSize: 14, fontWeight: '900', letterSpacing: 1 },

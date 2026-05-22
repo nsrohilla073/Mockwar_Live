@@ -219,12 +219,12 @@ function App() {
     if (walletBalance >= entryFee) {
       setIsJoining(true); 
       try {
-        const response = await axios.post(`${API_BASE}/api/game/play/`, { entry_fee: entryFee }, { headers: { Authorization: `Bearer ${token}` } });
+        const response = await axios.post(`${API_BASE}/api/game/play/`, { table_id: gameId }, { headers: { Authorization: `Bearer ${token}` } });
         if (response.data.success) { navigate(`/arena/${gameId}`); }
       } catch (error) { 
-        showAppAlert("Error", "Couldn't secure entry fee. Try again.", "error"); 
+        showAppAlert("Error", error.response?.data?.error || "Couldn't secure entry fee. Try again.", "error"); 
       } finally {
-        setIsJoining(false); // 🔴 YAHAN LOCK KHOL DO
+        setIsJoining(false); 
       }
     } else {
       showAppAlert("Low Balance", `You need ₹${entryFee} to play. Please Add Cash.`, "error");

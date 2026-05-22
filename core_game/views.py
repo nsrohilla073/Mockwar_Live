@@ -65,23 +65,28 @@ class RazorpayWebhookAPIView(APIView):
             razorpay_client.utility.verify_webhook_signature(payload, webhook_signature, RAZORPAY_WEBHOOK_SECRET)
             data = json.loads(payload)
             if data['event'] == 'payment.captured':
-                payment_entity = data['payload']['payment']['entity']
-                order_id = payment_entity['order_id']
-                payment_id = payment_entity['id']
-                try:
-                    transaction_obj = Transaction.objects.get(razorpay_order_id=order_id, status='PENDING')
-                    transaction_obj.status = 'SUCCESS'
-                    transaction_obj.razorpay_payment_id = payment_id
-                    transaction_obj.save()
-                    wallet = Wallet.objects.get(user=transaction_obj.user)
-                    wallet.deposit_balance += transaction_obj.amount
-                    wallet.save()
-                    return HttpResponse("Wallet Updated Successfully", status=200)
-                except Transaction.DoesNotExist:
-                    return HttpResponse("Transaction Not Found or Already Processed", status=200)
+                order_id = data['payload']['payment']['entity']['order_id']
+                payment_id = data['payload']['payment']['entity']['id']
+                
+                with transaction.atomic():
+                    try:
+                        transaction_obj = Transaction.objects.select_for_update().get(razorpay_order_id=order_id)
+                        if transaction_obj.status == 'SUCCESS':
+                            return HttpResponse("Already Processed", status=200)
+                        
+                        transaction_obj.status = 'SUCCESS'
+                        transaction_obj.razorpay_payment_id = payment_id
+                        transaction_obj.save()
+                        
+                        wallet = Wallet.objects.get(user=transaction_obj.user)
+                        wallet.deposit_balance += transaction_obj.amount
+                        wallet.save()
+                        return HttpResponse("Wallet Updated", status=200)
+                    except Transaction.DoesNotExist:
+                        return HttpResponse("Transaction Not Found", status=200)
             return HttpResponse("Event ignored", status=200)
-        except razorpay.errors.SignatureVerificationError:
-            return HttpResponse("Invalid Webhook Signature", status=400)
+        except Exception as e:
+            return HttpResponse("Invalid Request", status=400)
 
 class VerifyPaymentAPIView(APIView):
     authentication_classes = [JWTAuthentication]
@@ -90,26 +95,26 @@ class VerifyPaymentAPIView(APIView):
         razorpay_payment_id = request.data.get('razorpay_payment_id')
         razorpay_order_id = request.data.get('razorpay_order_id')
         razorpay_signature = request.data.get('razorpay_signature')
-        if not all([razorpay_payment_id, razorpay_order_id, razorpay_signature]): return Response({"error": "Missing required signature fields"}, status=status.HTTP_400_BAD_REQUEST)
         try:
             params_dict = {'razorpay_order_id': razorpay_order_id, 'razorpay_payment_id': razorpay_payment_id, 'razorpay_signature': razorpay_signature}
             razorpay_client.utility.verify_payment_signature(params_dict)
-            transaction_obj = Transaction.objects.get(razorpay_order_id=razorpay_order_id, user=request.user)
-            if transaction_obj.status == 'SUCCESS': return Response({"message": "Wallet already updated"}, status=status.HTTP_200_OK)
-            transaction_obj.status = 'SUCCESS'
-            transaction_obj.razorpay_payment_id = razorpay_payment_id
-            transaction_obj.save()
-            wallet = Wallet.objects.get(user=request.user)
-            wallet.deposit_balance += transaction_obj.amount
-            wallet.save()
+            
+            with transaction.atomic():
+                transaction_obj = Transaction.objects.select_for_update().get(razorpay_order_id=razorpay_order_id, user=request.user)
+                if transaction_obj.status == 'SUCCESS': 
+                    return Response({"message": "Wallet already updated"}, status=status.HTTP_200_OK)
+                
+                transaction_obj.status = 'SUCCESS'
+                transaction_obj.razorpay_payment_id = razorpay_payment_id
+                transaction_obj.save()
+                
+                wallet = Wallet.objects.get(user=request.user)
+                wallet.deposit_balance += transaction_obj.amount
+                wallet.save()
             return Response({"message": "Payment Verified & Wallet Updated"}, status=status.HTTP_200_OK)
-        except razorpay.errors.SignatureVerificationError:
-            return Response({"error": "Signature verification failed"}, status=status.HTTP_400_BAD_REQUEST)
-        except Transaction.DoesNotExist:
-            return Response({"error": "Transaction match not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
+            return Response({"error": "Verification Failed"}, status=status.HTTP_400_BAD_REQUEST)
+        
 class GetWalletBalanceAPIView(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
@@ -146,12 +151,19 @@ class ClaimBonusAPIView(APIView):
         try:
             user = request.user
             today = timezone.localdate()
-            already_claimed = Transaction.objects.filter(user=user, tx_type='BONUS', created_at__date=today).exists()
-            if already_claimed: return Response({"error": "You have already claimed today's bonus. Come back tomorrow!"}, status=status.HTTP_400_BAD_REQUEST)
-            wallet = Wallet.objects.get(user=user)
-            wallet.deposit_balance += Decimal('5.00')
-            wallet.save()
-            Transaction.objects.create(user=user, amount=Decimal('5.00'), tx_type='BONUS', status='SUCCESS', razorpay_order_id=f"BONUS_{int(time.time())}")
+            
+            # 🔴 FIX 1: Added Atomic Lock to prevent Race Condition
+            with transaction.atomic():
+                wallet = Wallet.objects.select_for_update().get(user=user)
+                already_claimed = Transaction.objects.filter(user=user, tx_type='BONUS', created_at__date=today).exists()
+                
+                if already_claimed: 
+                    return Response({"error": "You have already claimed today's bonus. Come back tomorrow!"}, status=status.HTTP_400_BAD_REQUEST)
+                
+                wallet.deposit_balance += Decimal('5.00')
+                wallet.save()
+                Transaction.objects.create(user=user, amount=Decimal('5.00'), tx_type='BONUS', status='SUCCESS', razorpay_order_id=f"BONUS_{int(time.time())}")
+                
             return Response({"success": True, "message": "₹5 Bonus Cash added to your wallet!"}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -160,9 +172,13 @@ class PlayGameAPIView(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     def post(self, request):
-        entry_fee_str = str(request.data.get('entry_fee', 0))
-        entry_fee = Decimal(entry_fee_str)
+        table_id = request.data.get('table_id') # Get ID from frontend, NOT amount
+        if not table_id: return Response({"error": "Table ID missing"}, status=status.HTTP_400_BAD_REQUEST)
+        
         try:
+            table = GameTable.objects.get(id=table_id)
+            entry_fee = table.entry_fee
+            
             with transaction.atomic():
                 wallet = Wallet.objects.select_for_update().get(user=request.user)
                 if wallet.total_balance() >= entry_fee:
@@ -322,37 +338,39 @@ class SubmitGameResultAPIView(APIView):
         try:
             user = request.user
             table_id = request.data.get('table_id')
-            score = int(request.data.get('score', 0))
-            wpm = int(request.data.get('wpm', 0))
-            status_result = request.data.get('status', 'LOSS')
-
+            room_id = request.data.get('room_id') 
+            
             table = GameTable.objects.filter(id=table_id).first()
             if not table: return Response({"error": "Table not found"}, status=status.HTTP_404_NOT_FOUND)
 
-            is_typing = 'typing' in table.category.name.lower()
-            if not is_typing:
-                max_points_per_q = 10 + table.time_per_question
-                max_possible_score = table.questions_count * max_points_per_q
-                if score > max_possible_score:
-                    return Response({"error": "Anti-Cheat: Impossible score detected."}, status=status.HTTP_403_FORBIDDEN)
-            else:
-                if wpm > 250 or score > (wpm + 100): 
-                    return Response({"error": "Anti-Cheat: Superhuman speed detected."}, status=status.HTTP_403_FORBIDDEN)
+            cache_key = f"match_result_arena_table_{table_id}_{room_id}"
+            server_result = cache.get(cache_key)
+            
+            if not server_result:
+                return Response({"error": "Match data not found or expired. Play fair!"}, status=status.HTTP_400_BAD_REQUEST)
+
+            my_gamer_tag = user.profile.gamer_tag
+            if my_gamer_tag not in server_result['players']:
+                return Response({"error": "You were not in this match!"}, status=status.HTTP_403_FORBIDDEN)
+
+            # 🔴 FIX 2: 2-minute time block hataya, ab Redis se track karenge ki paise mile ya nahi
+            if my_gamer_tag in server_result.get('claimed_users', []):
+                return Response({"error": "Result already claimed"}, status=status.HTTP_400_BAD_REQUEST)
+
+            my_score = server_result['players'][my_gamer_tag]['score']
+            my_wpm = server_result['players'][my_gamer_tag]['wpm']
+            
+            status_result = 'LOSS'
+            if server_result['is_draw']:
+                status_result = 'DRAW'
+            elif my_gamer_tag in server_result['winners']:
+                status_result = 'WIN'
 
             prize_won = Decimal('0.00')
             tx_type = None
 
             with transaction.atomic():
                 wallet = Wallet.objects.select_for_update().get(user=user)
-                
-              
-                already_submitted = MatchHistory.objects.filter(
-                    user=user, table=table, 
-                    played_at__gte=timezone.now() - timezone.timedelta(seconds=10)
-                ).exists()
-                
-                if already_submitted:
-                    return Response({"error": "Result already submitted"}, status=status.HTTP_400_BAD_REQUEST)
 
                 if status_result == 'WIN':
                     prize_won = Decimal(str(table.prize_pool))
@@ -364,9 +382,14 @@ class SubmitGameResultAPIView(APIView):
                     tx_type = 'REFUND'
 
                 wallet.save()
-                MatchHistory.objects.create(user=user, table=table, score=score, wpm=wpm, is_winner=(status_result == 'WIN'), prize_won=prize_won)
+                MatchHistory.objects.create(user=user, table=table, score=my_score, wpm=my_wpm, is_winner=(status_result == 'WIN'), prize_won=prize_won)
                 if tx_type:
-                    Transaction.objects.create(user=user, amount=prize_won, tx_type=tx_type, status='SUCCESS', razorpay_order_id=f"GAME_REWARD_{int(time.time())}")
+                    Transaction.objects.create(user=user, amount=prize_won, tx_type=tx_type, status='SUCCESS', razorpay_order_id=f"REWARD_{int(time.time())}")
+                
+                # Mark user as claimed in Cache so they can't hit API again for this match
+                server_result['claimed_users'] = server_result.get('claimed_users', [])
+                server_result['claimed_users'].append(my_gamer_tag)
+                cache.set(cache_key, server_result, 300)
 
             return Response({"prize_won": prize_won, "match_status": status_result}, status=status.HTTP_200_OK)
         except Exception as e:

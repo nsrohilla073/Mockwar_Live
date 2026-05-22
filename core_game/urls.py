@@ -1,5 +1,6 @@
 from django import views
-from django.urls import path
+from django.contrib import admin
+from django.urls import path, include
 from .views import (
     ClaimBonusAPIView,
     CreateOrderAPIView,
@@ -20,6 +21,11 @@ from .views import (
     UserDashboardHistoryAPIView,
     UserProfileAPIView
 )
+
+# 🌟 CUSTOM ADMIN TEXT
+admin.site.site_header = "MOCKWAR ESPORTS ADMIN"
+admin.site.site_title = "MockWar Secure Portal"
+admin.site.index_title = "Welcome to MockWar Command Center"
 
 urlpatterns = [
     # 💰 Payment & Wallet URLs

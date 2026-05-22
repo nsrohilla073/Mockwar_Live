@@ -103,7 +103,7 @@ function Arena() {
         setIsTypingMode(res.data.is_typing_test);
 
         const matchRoomId = res.data.room_id || `room_${Date.now()}`;
-        
+        matchRoomIdRef.current = matchRoomId; 
         ws.current = new WebSocket(`${WS_BASE}/ws/arena/${tableId}/${matchRoomId}/`);
         
         ws.current.onopen = () => {
@@ -383,6 +383,8 @@ function Arena() {
     }
   };
 
+  const matchRoomIdRef = useRef(""); 
+
   const handleMatchResult = async (data) => {
       if (apiCalled.current) return;
       apiCalled.current = true;
@@ -391,22 +393,15 @@ function Arena() {
 
       const myTag = myGamerTagRef.current;
       let cStatus = 'LOSS';
-
-      if (data.is_draw) {
-          cStatus = 'DRAW';
-      } else if (data.winners.includes(myTag)) {
-          cStatus = 'WIN';
-      }
-
+      if (data.is_draw) { cStatus = 'DRAW'; } 
+      else if (data.winners.includes(myTag)) { cStatus = 'WIN'; }
       setMatchStatus(cStatus);
 
       if (cStatus === 'WIN') playSound('win.mp3');
       else playSound('lose.mp3'); 
 
       const finalStandings = Object.entries(data.final_scores).map(([name, stats]) => ({
-          name,
-          score: stats.score,
-          isMe: name === myTag
+          name, score: stats.score, isMe: name === myTag
       })).sort((a, b) => b.score - a.score);
 
       let currentRank = 1;
@@ -419,15 +414,12 @@ function Arena() {
       try {
           const res = await axios.post(`${API_BASE}/api/game/submit-result/`, { 
               table_id: tableId,
-              score: data.final_scores[myTag].score,
-              wpm: data.final_scores[myTag].wpm,
-              accuracy: accuracyRef.current,
-              status: cStatus
+              room_id: matchRoomIdRef.current
           }, { headers: { Authorization: `Bearer ${token}` } });
 
           setMatchReward(res.data.prize_won || 0); 
       } catch (error) {
-          console.error("Submission Error:", error);
+          console.error("Submission Error:", error.response?.data?.error || error.message);
       } finally {
           setApiLoading(false);
       }

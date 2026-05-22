@@ -1,0 +1,199 @@
+/* =========================================================
+   MOCKWAR ESPORTS DARK THEME FOR DJANGO ADMIN 
+   ========================================================= */
+
+:root {
+    --bg-primary: #020617;      /* slate-950 */
+    --bg-secondary: #0f172a;    /* slate-900 */
+    --bg-card: #1e293b;         /* slate-800 */
+    --text-primary: #f8fafc;    /* slate-50 */
+    --text-secondary: #94a3b8;  /* slate-400 */
+    
+    --accent-blue: #3b82f6;     /* blue-500 */
+    --accent-blue-hover: #2563eb;
+    --accent-emerald: #10b981;  /* emerald-500 */
+    --accent-yellow: #facc15;   /* yellow-400 */
+    --accent-red: #ef4444;      /* red-500 */
+    
+    --border-color: #334155;    /* slate-700 */
+    --shadow-glow: 0 0 15px rgba(59, 130, 246, 0.3);
+}
+
+/* Base Body */
+body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, sans-serif;
+}
+
+/* Header (Top Navbar) */
+#header {
+    background: linear-gradient(135deg, #1e3a8a, #0f172a);
+    border-bottom: 2px solid var(--accent-blue);
+    box-shadow: var(--shadow-glow);
+    padding: 15px 20px;
+}
+#header a:link, #header a:visited {
+    color: var(--text-primary);
+    font-weight: 900;
+    letter-spacing: 1px;
+}
+#branding h1 {
+    font-weight: 900;
+    font-style: italic;
+    font-size: 24px;
+    color: #fff;
+    text-transform: uppercase;
+    text-shadow: 0 0 10px rgba(255,255,255,0.5);
+}
+#branding h1::before {
+    content: "🏆 MOCKWAR ";
+    color: var(--accent-yellow);
+}
+
+/* Sidebar / App List (Left Menu) */
+div.breadcrumbs {
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 10px 20px;
+}
+div.breadcrumbs a {
+    color: var(--accent-blue);
+    font-weight: bold;
+}
+
+/* Modules / Cards (Dashboard) */
+.module {
+    background: var(--bg-secondary) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    margin-bottom: 20px;
+    overflow: hidden;
+}
+.module caption {
+    background: linear-gradient(to right, var(--bg-card), var(--bg-secondary)) !important;
+    border-bottom: 1px solid var(--border-color);
+    padding: 12px 15px;
+}
+.module caption a.section:link, .module caption a.section:visited {
+    color: var(--accent-yellow) !important;
+    font-size: 14px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.module table th, .module table td {
+    border-bottom: 1px solid var(--border-color);
+}
+.module table tr:hover td {
+    background-color: rgba(59, 130, 246, 0.1) !important; /* Blue hover effect */
+}
+a:link, a:visited {
+    color: var(--accent-blue);
+}
+a:hover {
+    color: var(--accent-blue-hover);
+}
+
+/* Data Tables (Changelist) */
+#changelist {
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+}
+#changelist table thead th {
+    background-color: var(--bg-card);
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 2px solid var(--border-color);
+}
+#changelist table tbody tr {
+    background-color: var(--bg-secondary);
+}
+#changelist table tbody tr.row1 { background-color: var(--bg-secondary); }
+#changelist table tbody tr.row2 { background-color: #0b1120; } /* Slight variation */
+
+/* Buttons */
+.button, input[type=submit], input[type=button], .submit-row input, a.button {
+    background: linear-gradient(to right, var(--accent-blue), var(--accent-blue-hover));
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 15px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
+    transition: all 0.2s;
+    cursor: pointer;
+}
+.button:hover, input[type=submit]:hover {
+    transform: scale(0.98);
+    box-shadow: 0 2px 5px rgba(37, 99, 235, 0.5);
+}
+.button.default, input[type=submit].default {
+    background: linear-gradient(to right, var(--accent-emerald), #059669);
+    box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);
+}
+
+/* Forms & Inputs */
+input[type=text], input[type=password], input[type=email], input[type=url], input[type=number], textarea, select {
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: 8px;
+    padding: 8px 12px;
+}
+input[type=text]:focus, textarea:focus, select:focus {
+    border-color: var(--accent-blue);
+    outline: none;
+    box-shadow: 0 0 5px rgba(59, 130, 246, 0.5);
+}
+
+/* Object Tools (Add button on top right) */
+.object-tools a.addlink {
+    background: var(--accent-emerald) !important;
+    border-radius: 8px;
+    font-weight: bold;
+}
+
+/* Filters Sidebar */
+#changelist-filter {
+    background: var(--bg-card);
+    border-left: 1px solid var(--border-color);
+}
+#changelist-filter h2 {
+    background: var(--bg-secondary);
+    color: var(--accent-yellow);
+    border-bottom: 1px solid var(--border-color);
+    text-transform: uppercase;
+}
+#changelist-filter li a {
+    color: var(--text-secondary);
+}
+#changelist-filter li.selected a {
+    color: var(--accent-blue);
+    font-weight: bold;
+}
+
+/* Action Bar */
+.actions {
+    background-color: var(--bg-card);
+    border-bottom: 1px solid var(--border-color);
+    padding: 10px;
+    border-radius: 12px 12px 0 0;
+}
+.actions select {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+/* Warning / Delete buttons */
+a.deletelink, .delete {
+    background: var(--accent-red) !important;
+    color: white !important;
+}
