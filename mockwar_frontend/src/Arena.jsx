@@ -1,9 +1,10 @@
-const API_BASE = "https://mockwar-backend.onrender.com";
-const WS_BASE = "wss://mockwar-backend.onrender.com";
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Clock, Trophy, User, Award, Swords, Crosshair, Zap, Users, Loader2, Volume2, VolumeX } from "lucide-react";
 import axios from "axios";
+
+const API_BASE = "https://mockwar-backend.onrender.com";
+const WS_BASE = "wss://mockwar-backend.onrender.com";
 
 function Arena() {
   const { tableId } = useParams(); 
@@ -11,17 +12,7 @@ function Arena() {
   const token = localStorage.getItem("access_token");
   
   const hasSubmitted = useRef(false); 
-
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  
-  const playSound = (soundFile) => {
-    if (soundEnabled) {
-      const audio = new Audio(`/sounds/${soundFile}`);
-      audio.volume = 0.5;
-      audio.play().catch(e => console.log("Sound play error:", e));
-    }
-  };
-  const apiCalled = useRef(false); 
+  const apiCalled = useRef(false);
 
   const [maxPlayers, setMaxPlayers] = useState(2); 
   const maxPlayersRef = useRef(2); 
@@ -35,6 +26,38 @@ function Arena() {
   const [timePerQ, setTimePerQ] = useState(12); 
   const [apiLoading, setApiLoading] = useState(false);
 
+  // 🎵 Audio State & Preloading
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const soundRefs = useRef({});
+
+  useEffect(() => {
+    // 🔴 NAYA: Web Audio Preloading
+    const soundsToLoad = {
+      'tick.mp3': new Audio('/sounds/tick.mp3'),
+      'correct.mp3': new Audio('/sounds/correct.mp3'),
+      'wrong.mp3': new Audio('/sounds/wrong.mp3'),
+      'win.mp3': new Audio('/sounds/win.mp3'),
+      'lose.mp3': new Audio('/sounds/lose.mp3'),
+      'match-found.mp3': new Audio('/sounds/match-found.mp3')
+    };
+
+    // Preload them
+    Object.values(soundsToLoad).forEach(audio => {
+      audio.load();
+      audio.volume = 0.5;
+    });
+    
+    soundRefs.current = soundsToLoad;
+  }, []);
+
+  const playSound = (soundFileName) => {
+    if (soundEnabled && soundRefs.current[soundFileName]) {
+      const audio = soundRefs.current[soundFileName];
+      audio.currentTime = 0; // Restart if already playing
+      audio.play().catch(e => console.log("Sound play error (Autoplay restricted by browser):", e));
+    }
+  };
+
   const [myPoints, setMyPoints] = useState(0);
   const myPointsRef = useRef(0);
   const myGamerTagRef = useRef("Live_Player"); 
@@ -45,22 +68,10 @@ function Arena() {
   
   const [matchStandings, setMatchStandings] = useState([]);
   const [matchReward, setMatchReward] = useState(0); 
-  
-  // 🔴 NAYA STATE UI FIX KE LIYE
   const [matchStatus, setMatchStatus] = useState(''); 
 
   const [userAnswers, setUserAnswers] = useState([]);
-
-  const updateOpponents = (newOppFunc) => {
-      setOpponents(prev => {
-          const updated = typeof newOppFunc === 'function' ? newOppFunc(prev) : newOppFunc;
-          opponentsRef.current = updated;
-          return updated;
-      });
-  };
-
-  useEffect(() => { myPointsRef.current = myPoints; }, [myPoints]);
-  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+  const matchRoomIdRef = useRef(""); 
 
   const [questions, setQuestions] = useState([]);
   const [currentQIndex, setCurrentQIndex] = useState(0);
@@ -72,16 +83,22 @@ function Arena() {
   const accuracyRef = useRef(100);
   const typingStartTime = useRef(null);
 
+  const updateOpponents = (newOppFunc) => {
+      setOpponents(prev => {
+          const updated = typeof newOppFunc === 'function' ? newOppFunc(prev) : newOppFunc;
+          opponentsRef.current = updated;
+          return updated;
+      });
+  };
+
+  useEffect(() => { myPointsRef.current = myPoints; }, [myPoints]);
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
   useEffect(() => { wpmRef.current = wpm; }, [wpm]);
   useEffect(() => { accuracyRef.current = accuracy; }, [accuracy]);
-  
+
   const sendMyScore = (newScore) => {
       if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-          ws.current.send(JSON.stringify({
-              action: 'score_update',
-              score: newScore,
-              player_name: myGamerTagRef.current
-          }));
+          ws.current.send(JSON.stringify({ action: 'score_update', score: newScore, player_name: myGamerTagRef.current }));
       }
   };
 
@@ -93,9 +110,7 @@ function Arena() {
         const profRes = await axios.get(`${API_BASE}/api/user/profile/`, { headers: { Authorization: `Bearer ${token}` } });
         myGamerTagRef.current = profRes.data.gamer_tag;
 
-        const res = await axios.get(`${API_BASE}/api/game/content/${tableId}/`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await axios.get(`${API_BASE}/api/game/content/${tableId}/`, { headers: { Authorization: `Bearer ${token}` } });
         
         const tableLimit = res.data.max_players || 2;
         setMaxPlayers(tableLimit);
@@ -104,113 +119,78 @@ function Arena() {
 
         const matchRoomId = res.data.room_id || `room_${Date.now()}`;
         matchRoomIdRef.current = matchRoomId; 
+
         ws.current = new WebSocket(`${WS_BASE}/ws/arena/${tableId}/${matchRoomId}/`);
-        
-        ws.current.onopen = () => {
-            sendMyScore(0); 
-        };
+        ws.current.onopen = () => { sendMyScore(0); };
 
         ws.current.onmessage = (event) => {
             const data = JSON.parse(event.data);
             const myTag = myGamerTagRef.current;
 
+            // 🔴 BUG FIX 1: Instant Handshake to Sync Names
+            if (data.action === 'player_joined' && data.player !== myTag && data.player !== "Live_Player") {
+                sendMyScore(myPointsRef.current); 
+            }
+
             if (data.action === 'questions_ready') {
                 if (data.content.is_typing_test) {
-                    setIsTypingMode(true);
-                    setTargetParagraph(data.content.paragraph);
-                    setTimeLeft(data.content.time_limit);
+                    setIsTypingMode(true); setTargetParagraph(data.content.paragraph); setTimeLeft(data.content.time_limit);
                 } else {
-                    setIsTypingMode(false);
-                    setQuestions(data.content.questions);
-                    setTimePerQ(data.content.time_per_question);
-                    setTimeLeft(data.content.time_per_question);
+                    setIsTypingMode(false); setQuestions(data.content.questions); setTimePerQ(data.content.time_per_question); setTimeLeft(data.content.time_per_question);
                 }
-                
-                setTimeout(() => {
-                    setGameState("playing");
-                    typingStartTime.current = Date.now();
-                }, 1500); 
+                setTimeout(() => { setGameState("playing"); typingStartTime.current = Date.now(); }, 1500); 
             }
 
             if (data.action === 'score_update' && data.player && data.player !== myTag && data.player !== "Live_Player") {
-                let isNewPlayer = false;
                 updateOpponents(prev => {
                     const existing = prev.find(o => o.name === data.player);
                     if (existing) {
                         return prev.map(o => o.name === data.player ? { ...o, score: data.score } : o);
                     } else {
-                        if (gameStateRef.current === "searching" && prev.length < maxPlayersRef.current - 1) {
-                            isNewPlayer = true;
-                            return [...prev, { name: data.player, score: data.score, isBot: false }];
-                        }
-                        return prev;
+                        return [...prev, { name: data.player, score: data.score, isBot: false }];
                     }
                 });
-
-                if (isNewPlayer && gameStateRef.current === "searching") {
-                    setSearchTime(60); 
-                    setTimeout(() => sendMyScore(myPointsRef.current), 500); 
-                }
             }
 
-            if (data.action === 'waiting_for_opponent') {
-                setGameState("waiting_result");
-            }
-
-            if (data.action === 'match_result') {
-                handleMatchResult(data);
-            }
+            if (data.action === 'waiting_for_opponent') setGameState("waiting_result");
+            if (data.action === 'match_result') handleMatchResult(data);
         };
-
       } catch (error) {
         console.error("Initialization Error:", error);
         navigate("/");
       }
     };
-    
     initGame();
     return () => { if (ws.current) ws.current.close(); };
   }, [tableId, token, navigate]);
 
   useEffect(() => {
     if (gameState !== "searching") return;
-
     searchIntervalRef.current = setInterval(() => {
         setSearchTime(prev => {
-            if (prev <= 1) {
-                clearInterval(searchIntervalRef.current);
-                fillWithBotsAndStart();
-                return 0;
-            }
+            if (prev <= 1) { clearInterval(searchIntervalRef.current); fillWithBotsAndStart(); return 0; }
             return prev - 1;
         });
     }, 1000);
-
     return () => clearInterval(searchIntervalRef.current);
   }, [gameState]);
 
   useEffect(() => {
+      // 🔴 BUG FIX 2: 1.5 Second delay before match starts
       if (gameState === "searching" && opponents.length === maxPlayers - 1 && maxPlayers > 1) {
           clearInterval(searchIntervalRef.current);
-          triggerMatchFound();
+          setTimeout(() => { triggerMatchFound(); }, 1500);
       }
   }, [opponents.length, gameState, maxPlayers]);
 
   const generateBotName = () => {
-      const firstNames = ["Rahul", "Neha", "Vikas", "Priya", "Aman", "Rohit", "Pooja", "Sonu", "Monu", "Jaat", "Desi", "Gamer", "Pro", "Ninja", "King", "Queen", "Ankit", "Komal", "Sahil", "Deepak", "Anjali", "Rajat", "Kuldeep", "Sumit"];
+      const firstNames = ["Rahul", "Neha", "Vikas", "Priya", "Aman", "Rohit", "Pooja", "Sonu", "Monu", "Jaat", "Desi", "Gamer", "Pro", "Ninja", "King", "Queen", "Ankit", "Komal"];
       const suffixes = ["OP", "Pro", "Kill", "Sniper", "Don", "Hry", "Boy", "Girl", "Boss", "007", "X", "Max", "YT"];
-      
       const type = Math.floor(Math.random() * 3); 
       const fName = firstNames[Math.floor(Math.random() * firstNames.length)];
-      
-      if (type === 0) {
-          return `${fName}${Math.floor(100 + Math.random() * 9000)}`; 
-      } else if (type === 1) {
-          const suf = suffixes[Math.floor(Math.random() * suffixes.length)];
-          return `${fName}_${suf}`; 
-      } else {
-          return `${fName}${Math.floor(10 + Math.random() * 90)}`; 
-      }
+      if (type === 0) return `${fName}${Math.floor(100 + Math.random() * 9000)}`; 
+      else if (type === 1) return `${fName}_${suffixes[Math.floor(Math.random() * suffixes.length)]}`; 
+      else return `${fName}${Math.floor(10 + Math.random() * 90)}`; 
   };
 
   const fillWithBotsAndStart = () => {
@@ -218,9 +198,7 @@ function Arena() {
           let newOpp = [...prev];
           while (newOpp.length < maxPlayersRef.current - 1) {
               let newName = generateBotName();
-              while(newOpp.some(o => o.name === newName) || newName === myGamerTagRef.current) {
-                  newName = generateBotName();
-              }
+              while(newOpp.some(o => o.name === newName) || newName === myGamerTagRef.current) newName = generateBotName();
               newOpp.push({ name: newName, score: 0, isBot: true });
           }
           return newOpp;
@@ -241,33 +219,13 @@ function Arena() {
     if (timeLeft > 0) {
       const timer = setTimeout(() => {
         setTimeLeft(timeLeft - 1);
-        
-        if (timeLeft <= 5 && timeLeft > 0) {
-            playSound('tick.mp3');
-        }
+        if (timeLeft <= 5 && timeLeft > 0) playSound('tick.mp3'); 
         
         updateOpponents(prev => prev.map(opp => {
              if (opp.isBot) {
                  if (Math.random() < 0.20) return opp; 
-
-                 const myCurrentScore = myPointsRef.current;
-                 const scoreDiff = myCurrentScore - opp.score;
-                 let pointsToAdd = 0;
-
-                 if (isTypingMode) {
-                     if (scoreDiff > 10) {
-                         pointsToAdd = Math.floor(Math.random() * 8) + 5; 
-                     } else if (scoreDiff >= -5 && scoreDiff <= 10) {
-                         pointsToAdd = Math.floor(Math.random() * 5) + 1; 
-                     } else {
-                         pointsToAdd = Math.floor(Math.random() * 2); 
-                     }
-                 } else {
-                     if (timeLeft % 5 === 0 && Math.random() > 0.3) {
-                         pointsToAdd = (Math.random() > 0.4) ? (10 + timeLeft) : 0; 
-                     }
-                 }
-
+                 const scoreDiff = myPointsRef.current - opp.score;
+                 let pointsToAdd = isTypingMode ? (scoreDiff > 10 ? Math.floor(Math.random() * 8) + 5 : Math.floor(Math.random() * 5)) : (timeLeft % 5 === 0 && Math.random() > 0.3 ? (10 + timeLeft) : 0);
                  return { ...opp, score: opp.score + pointsToAdd };
              }
              return opp;
@@ -285,46 +243,27 @@ function Arena() {
     const dbAnswer = currentQ.answer.toUpperCase().trim();
     const selectedIndex = currentQ.options.indexOf(selectedOption);
     const selectedLetter = ["A", "B", "C", "D"][selectedIndex];
-
     const isCorrect = selectedLetter === dbAnswer;
     
-    if (isCorrect) playSound('correct.mp3');
-    else playSound('wrong.mp3');
-
+    if (isCorrect) playSound('correct.mp3'); else playSound('wrong.mp3');
     const earnedPoints = isCorrect ? (10 + timeLeft) : 0; 
     
-    setUserAnswers(prev => [...prev, { 
-      question: currentQ.question, 
-      userAnswer: selectedOption, 
-      correctAnswer: currentQ.options[["A", "B", "C", "D"].indexOf(dbAnswer)],
-      isCorrect: isCorrect 
-    }]);
+    setUserAnswers(prev => [...prev, { question: currentQ.question, userAnswer: selectedOption, correctAnswer: currentQ.options[["A", "B", "C", "D"].indexOf(dbAnswer)], isCorrect: isCorrect }]);
 
     const updatedMyPoints = myPoints + earnedPoints;
-    setMyPoints(updatedMyPoints);
-    sendMyScore(updatedMyPoints); 
-
+    setMyPoints(updatedMyPoints); sendMyScore(updatedMyPoints); 
     handleNextQuestion(updatedMyPoints, selectedOption);
   };
 
-  const handleNextQuestion = (finalMyPoints, selectedOption) => {
-    if (!selectedOption) {
+  const handleNextQuestion = (finalMyPoints, selectedOption = null) => {
+    if (!selectedOption && !isTypingMode && questions.length > 0) {
         playSound('wrong.mp3'); 
         const currentQ = questions[currentQIndex];
-        setUserAnswers(prev => [...prev, { 
-            question: currentQ.question, 
-            userAnswer: "Time Out / छूट गया", 
-            correctAnswer: currentQ.options[["A", "B", "C", "D"].indexOf(currentQ.answer)],
-            isCorrect: false 
-        }]);
+        setUserAnswers(prev => [...prev, { question: currentQ.question, userAnswer: "Time Out / छूट गया", correctAnswer: currentQ.options[["A", "B", "C", "D"].indexOf(currentQ.answer)], isCorrect: false }]);
     }
-
     if (currentQIndex + 1 < questions.length) {
-      setCurrentQIndex(currentQIndex + 1);
-      setTimeLeft(timePerQ); 
-    } else {
-      triggerRefereeSubmit(finalMyPoints); 
-    }
+      setCurrentQIndex(currentQIndex + 1); setTimeLeft(timePerQ); 
+    } else { triggerRefereeSubmit(finalMyPoints); }
   };
 
   const handleTypingChange = (e) => {
@@ -334,24 +273,15 @@ function Arena() {
     const words = value.trim().split(/\s+/).length;
     const currentWpm = value.length > 0 ? Math.round(words / (timeElapsedMins || 0.01)) : 0;
     setWpm(currentWpm);
-
     const cleanTarget = targetParagraph.replace(/[^a-zA-Z0-9]/g, '');
     const cleanTyped = value.replace(/[^a-zA-Z0-9]/g, '');
-
     let correctChars = 0;
-    for (let i = 0; i < cleanTyped.length; i++) {
-      if (i < cleanTarget.length && cleanTyped[i] === cleanTarget[i]) correctChars++;
-    }
+    for (let i = 0; i < cleanTyped.length; i++) { if (i < cleanTarget.length && cleanTyped[i] === cleanTarget[i]) correctChars++; }
     const currentAccuracy = cleanTyped.length > 0 ? Math.round((correctChars / cleanTyped.length) * 100) : 100;
     setAccuracy(currentAccuracy);
-
     const currentPoints = value.length > 0 ? currentWpm + currentAccuracy : 0;
-    setMyPoints(currentPoints);
-    sendMyScore(currentPoints); 
-
-    if (cleanTyped === cleanTarget && cleanTarget.length > 0) {
-      triggerRefereeSubmit(currentPoints);
-    }
+    setMyPoints(currentPoints); sendMyScore(currentPoints); 
+    if (cleanTyped === cleanTarget && cleanTarget.length > 0) triggerRefereeSubmit(currentPoints);
   };
 
   const handlePaste = (e) => { e.preventDefault(); };
@@ -359,70 +289,38 @@ function Arena() {
   const triggerRefereeSubmit = (finalMyPts) => {
     if (hasSubmitted.current) return;
     hasSubmitted.current = true; 
-
     setGameState("waiting_result"); 
-
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-        ws.current.send(JSON.stringify({
-            action: 'game_finished',
-            player_name: myGamerTagRef.current,
-            score: finalMyPts,
-            wpm: wpmRef.current
-        }));
-
-        opponentsRef.current.forEach(opp => {
-            if (opp.isBot) {
-                ws.current.send(JSON.stringify({
-                    action: 'game_finished',
-                    player_name: opp.name,
-                    score: opp.score,
-                    wpm: 0
-                }));
-            }
-        });
+        ws.current.send(JSON.stringify({ action: 'game_finished', player_name: myGamerTagRef.current, score: finalMyPts, wpm: wpmRef.current }));
+        opponentsRef.current.forEach(opp => { if (opp.isBot) ws.current.send(JSON.stringify({ action: 'game_finished', player_name: opp.name, score: opp.score, wpm: 0 })); });
     }
   };
-
-  const matchRoomIdRef = useRef(""); 
 
   const handleMatchResult = async (data) => {
       if (apiCalled.current) return;
       apiCalled.current = true;
-      setGameState("finished");
+      
+      // 🔴 BUG FIX 3: Hold UI until API response
+      setGameState("waiting_result"); 
       setApiLoading(true);
 
       const myTag = myGamerTagRef.current;
-      let cStatus = 'LOSS';
-      if (data.is_draw) { cStatus = 'DRAW'; } 
-      else if (data.winners.includes(myTag)) { cStatus = 'WIN'; }
-      setMatchStatus(cStatus);
-
-      if (cStatus === 'WIN') playSound('win.mp3');
-      else playSound('lose.mp3'); 
-
-      const finalStandings = Object.entries(data.final_scores).map(([name, stats]) => ({
-          name, score: stats.score, isMe: name === myTag
-      })).sort((a, b) => b.score - a.score);
-
+      const finalStandings = Object.entries(data.final_scores).map(([name, stats]) => ({ name, score: stats.score, isMe: name === myTag })).sort((a, b) => b.score - a.score);
       let currentRank = 1;
-      finalStandings.forEach((p, idx) => {
-          if (idx > 0 && p.score < finalStandings[idx-1].score) currentRank = idx + 1;
-          p.rank = currentRank;
-      });
+      finalStandings.forEach((p, idx) => { if (idx > 0 && p.score < finalStandings[idx-1].score) currentRank = idx + 1; p.rank = currentRank; });
       setMatchStandings(finalStandings);
 
       try {
-          const res = await axios.post(`${API_BASE}/api/game/submit-result/`, { 
-              table_id: tableId,
-              room_id: matchRoomIdRef.current
-          }, { headers: { Authorization: `Bearer ${token}` } });
-
-          setMatchReward(res.data.prize_won || 0); 
+          const res = await axios.post(`${API_BASE}/api/game/submit-result/`, { table_id: tableId, room_id: matchRoomIdRef.current }, { headers: { Authorization: `Bearer ${token}` } });
+          const actualStatus = res.data.match_status;
+          setMatchStatus(actualStatus); setMatchReward(res.data.prize_won || 0); 
+          if (actualStatus === 'WIN') playSound('win.mp3'); else playSound('lose.mp3'); 
+          setGameState("finished"); 
       } catch (error) {
           console.error("Submission Error:", error.response?.data?.error || error.message);
-      } finally {
-          setApiLoading(false);
-      }
+          alert("Reward Error: " + (error.response?.data?.error || "Network error while claiming prize."));
+          setMatchStatus('LOSS'); setMatchReward(0); setGameState("finished");
+      } finally { setApiLoading(false); }
   };
 
   return (
@@ -439,9 +337,7 @@ function Arena() {
         <div className="flex flex-col items-center space-y-8 animate-fade-in z-10 w-full max-w-sm">
           <div className="text-center">
             <h1 className="text-2xl font-black tracking-widest text-slate-200 uppercase bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">Securing Arena</h1>
-            <p className="text-xs text-blue-400 font-bold uppercase tracking-widest mt-1.5 flex items-center justify-center gap-1.5">
-              <Loader2 size={14} className="animate-spin"/> Matchmaking Active
-            </p>
+            <p className="text-xs text-blue-400 font-bold uppercase tracking-widest mt-1.5 flex items-center justify-center gap-1.5"><Loader2 size={14} className="animate-spin"/> Matchmaking Active</p>
           </div>
 
           <div className="w-full bg-slate-900/80 backdrop-blur-md p-5 rounded-3xl border border-slate-700/80 shadow-[0_0_30px_rgba(0,0,0,0.5)]">
@@ -488,9 +384,7 @@ function Arena() {
           </div>
           <div>
             <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-green-600 tracking-wider uppercase drop-shadow-md">MATCH FOUND!</h1>
-            <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-2 flex items-center justify-center gap-1.5">
-               <Users size={12}/> {opponents.length + 1} Warriors Ready
-            </p>
+            <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-2 flex items-center justify-center gap-1.5"><Users size={12}/> {opponents.length + 1} Warriors Ready</p>
             <p className="mt-6 text-sm text-yellow-500 font-black uppercase tracking-widest animate-pulse">Generating Map & Arena...</p>
           </div>
         </div>
@@ -517,9 +411,7 @@ function Arena() {
                  {opponents.map((opp, idx) => (
                      <div key={idx} className="bg-slate-900 border border-slate-700/80 p-3 rounded-2xl text-center relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-1 h-full bg-orange-500/50"></div>
-                        <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest truncate px-2">
-                           {opp.name}
-                        </p>
+                        <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest truncate px-2">{opp.name}</p>
                         <p className="text-2xl font-black mt-1 text-slate-300">{opp.score}</p>
                      </div>
                  ))}
@@ -536,9 +428,7 @@ function Arena() {
                 {questions[currentQIndex].options.map((option, idx) => (
                   <button key={idx} onClick={() => handleAnswerClick(option)}
                     className="group bg-slate-900/60 backdrop-blur-sm border border-slate-800 hover:border-blue-500 hover:bg-slate-800 hover:shadow-[0_0_15px_rgba(59,130,246,0.2)] text-slate-300 font-bold py-4 px-5 rounded-xl text-left transition-all active:scale-[0.98] text-base cursor-pointer flex items-center">
-                    <span className="bg-slate-950 text-blue-500 border border-slate-800 group-hover:border-blue-500 font-black w-8 h-8 flex items-center justify-center rounded-lg mr-3 transition-colors">
-                      {['A','B','C','D'][idx]}
-                    </span> 
+                    <span className="bg-slate-950 text-blue-500 border border-slate-800 group-hover:border-blue-500 font-black w-8 h-8 flex items-center justify-center rounded-lg mr-3 transition-colors">{['A','B','C','D'][idx]}</span> 
                     {option}
                   </button>
                 ))}
@@ -553,55 +443,21 @@ function Arena() {
                 <span className="text-emerald-400 flex items-center gap-1.5"><Crosshair size={16}/> Accuracy: {accuracy}%</span>
               </div>
 
-              <div 
-                className="relative w-full bg-slate-950/80 backdrop-blur-md p-6 md:p-8 rounded-[2rem] border border-slate-700/80 shadow-[0_0_40px_rgba(0,0,0,0.5)] overflow-hidden cursor-text group" 
-                onClick={() => document.getElementById('hidden-typer')?.focus()}
-              >
-                
+              <div className="relative w-full bg-slate-950/80 backdrop-blur-md p-6 md:p-8 rounded-[2rem] border border-slate-700/80 shadow-[0_0_40px_rgba(0,0,0,0.5)] overflow-hidden cursor-text group" onClick={() => document.getElementById('hidden-typer')?.focus()}>
                 <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-focus-within:opacity-100 transition-opacity pointer-events-none"></div>
 
                 <div className="text-xl md:text-3xl leading-relaxed md:leading-loose font-mono tracking-wide text-left relative z-10 pointer-events-none flex flex-wrap">
                   {targetParagraph.split("").map((char, index) => {
-                    let charStyle = "text-slate-600";
-                    let cursorStyle = "";
-
-                    if (index < typedText.length) {
-                      charStyle = typedText[index] === char 
-                        ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.4)]" 
-                        : "text-red-400 bg-red-500/20 rounded-sm border-b-4 border-red-500"; 
-                    } else if (index === typedText.length) {
-                      charStyle = "text-slate-100 font-bold drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]";
-                      cursorStyle = "border-l-[3px] border-blue-500 animate-pulse bg-blue-500/20 rounded-r-sm";
-                    }
-
+                    let charStyle = "text-slate-600"; let cursorStyle = "";
+                    if (index < typedText.length) { charStyle = typedText[index] === char ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.4)]" : "text-red-400 bg-red-500/20 rounded-sm border-b-4 border-red-500"; 
+                    } else if (index === typedText.length) { charStyle = "text-slate-100 font-bold drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]"; cursorStyle = "border-l-[3px] border-blue-500 animate-pulse bg-blue-500/20 rounded-r-sm"; }
                     const displayChar = char === " " ? "\u00A0" : char; 
-
-                    return (
-                      <span key={index} className={`relative transition-colors duration-100 ${charStyle} ${cursorStyle}`}>
-                        {displayChar}
-                      </span>
-                    );
+                    return (<span key={index} className={`relative transition-colors duration-100 ${charStyle} ${cursorStyle}`}>{displayChar}</span>);
                   })}
                 </div>
-                
-                <textarea
-                  id="hidden-typer"
-                  autoFocus
-                  value={typedText}
-                  onChange={(e) => {
-                      if (e.target.value.length <= targetParagraph.length) handleTypingChange(e);
-                  }}
-                  onPaste={handlePaste}
-                  onCopy={(e) => e.preventDefault()}
-                  autoComplete="off"
-                  spellCheck="false"
-                  className="absolute inset-0 w-full h-full opacity-0 resize-none z-20 cursor-text"
-                />
+                <textarea id="hidden-typer" autoFocus value={typedText} onChange={(e) => { if (e.target.value.length <= targetParagraph.length) handleTypingChange(e); }} onPaste={handlePaste} onCopy={(e) => e.preventDefault()} autoComplete="off" spellCheck="false" className="absolute inset-0 w-full h-full opacity-0 resize-none z-20 cursor-text" />
               </div>
-
-              <p className="text-center text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-2 animate-pulse">
-                 Tap on the text box to start typing
-              </p>
+              <p className="text-center text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-2 animate-pulse">Tap on the text box to start typing</p>
             </div>
           )}
         </div>
@@ -685,7 +541,7 @@ function Arena() {
           </div>
 
           {!isTypingMode && userAnswers.length > 0 && (
-              <div className="w-full bg-slate-900 border border-slate-800 rounded-[2rem] p-6 space-y-4 shadow-2xl animate-fade-in">
+              <div className="w-full bg-slate-900 border border-slate-800 rounded-[2rem] p-6 space-y-4 shadow-2xl animate-fade-in mt-6">
                   <h3 className="text-center text-xs font-black uppercase text-slate-400 tracking-widest flex items-center justify-center gap-1.5"><Crosshair size={14}/> Quiz Accuracy Review</h3>
                   {userAnswers.map((ans, idx) => (
                       <div key={idx} className={`p-4 rounded-xl border ${ans.isCorrect ? "bg-emerald-950/20 border-emerald-500/20" : "bg-red-950/20 border-red-500/20"}`}>

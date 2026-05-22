@@ -28,7 +28,6 @@ export default function Arena({ route, navigation }) {
   const [timePerQ, setTimePerQ] = useState(12); 
   const [apiLoading, setApiLoading] = useState(false);
 
-  // 🎵 Audio State
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   const [myPoints, setMyPoints] = useState(0);
@@ -43,7 +42,6 @@ export default function Arena({ route, navigation }) {
   const [matchReward, setMatchReward] = useState(0); 
   const [matchStatus, setMatchStatus] = useState(''); 
 
-  // 🌟 NAYA: Web Jaisa Accuracy Review aur Secure Validation
   const [userAnswers, setUserAnswers] = useState([]);
   const matchRoomIdRef = useRef(""); 
 
@@ -70,35 +68,23 @@ export default function Arena({ route, navigation }) {
   useEffect(() => { wpmRef.current = wpm; }, [wpm]);
   useEffect(() => { accuracyRef.current = accuracy; }, [accuracy]);
 
-  // 🎵 Native Audio Playback Helper
-   const soundRefs = useRef({}); // Store preloaded sounds
+  const soundRefs = useRef({}); 
 
   useEffect(() => {
-    // Preload sounds when Arena opens
-    const preloadSounds = async () => {
+    const setupAndPreloadSounds = async () => {
       try {
-        const tick = await Audio.Sound.createAsync(require('./assets/sounds/tick.mp3'));
-        const correct = await Audio.Sound.createAsync(require('./assets/sounds/correct.mp3'));
-        const wrong = await Audio.Sound.createAsync(require('./assets/sounds/wrong.mp3'));
-        const win = await Audio.Sound.createAsync(require('./assets/sounds/win.mp3'));
-        const lose = await Audio.Sound.createAsync(require('./assets/sounds/lose.mp3'));
-        const matchFound = await Audio.Sound.createAsync(require('./assets/sounds/match-found.mp3'));
+        await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: false, shouldDuckAndroid: true, playThroughEarpieceAndroid: false });
+        const tick = await Audio.Sound.createAsync(require('../assets/sounds/tick.mp3'));
+        const correct = await Audio.Sound.createAsync(require('../assets/sounds/correct.mp3'));
+        const wrong = await Audio.Sound.createAsync(require('../assets/sounds/wrong.mp3'));
+        const win = await Audio.Sound.createAsync(require('../assets/sounds/win.mp3'));
+        const lose = await Audio.Sound.createAsync(require('../assets/sounds/lose.mp3'));
+        const matchFound = await Audio.Sound.createAsync(require('../assets/sounds/match-found.mp3'));
 
-        soundRefs.current = {
-          'tick.mp3': tick.sound,
-          'correct.mp3': correct.sound,
-          'wrong.mp3': wrong.sound,
-          'win.mp3': win.sound,
-          'lose.mp3': lose.sound,
-          'match-found.mp3': matchFound.sound
-        };
-      } catch (error) {
-        console.log("Audio Preload Error:", error);
-      }
+        soundRefs.current = { 'tick.mp3': tick.sound, 'correct.mp3': correct.sound, 'wrong.mp3': wrong.sound, 'win.mp3': win.sound, 'lose.mp3': lose.sound, 'match-found.mp3': matchFound.sound };
+      } catch (error) { console.log("Audio Preload Error:", error); }
     };
-    preloadSounds();
-
-    // Cleanup memory when leaving Arena
+    setupAndPreloadSounds();
     return () => {
       Object.values(soundRefs.current).forEach(async (soundObj) => {
         try { await soundObj.unloadAsync(); } catch (e) {}
@@ -110,15 +96,10 @@ export default function Arena({ route, navigation }) {
     if (!soundEnabled) return;
     try {
       const soundObj = soundRefs.current[soundFileName];
-      if (soundObj) {
-        await soundObj.replayAsync(); // Use replay to play instantly without reloading
-      }
-    } catch (error) {
-      console.log("Play Error", error);
-    }
+      if (soundObj) await soundObj.replayAsync(); 
+    } catch (error) { console.log("Play Error", error); }
   };
 
-  // 🚀 ANTI-CHEAT
   useEffect(() => {
     const backAction = () => {
       if (gameStateRef.current === 'playing' || gameStateRef.current === 'searching' || gameStateRef.current === 'found') {
@@ -145,7 +126,6 @@ export default function Arena({ route, navigation }) {
       }
   };
 
-  // 🚀 1. INITIALIZE GAME & WEBSOCKET
   useEffect(() => {
     const initGame = async () => {
       try {
@@ -160,7 +140,7 @@ export default function Arena({ route, navigation }) {
         setIsTypingMode(res.data.is_typing_test);
 
         const matchRoomId = res.data.room_id || `room_${Date.now()}`;
-        matchRoomIdRef.current = matchRoomId; // 🔴 SECURE FIX: Store Room ID for validation
+        matchRoomIdRef.current = matchRoomId; 
 
         ws.current = new WebSocket(`${WS_BASE}/ws/arena/${tableId}/${matchRoomId}/`);
         ws.current.onopen = () => { sendMyScore(0); };
@@ -169,42 +149,29 @@ export default function Arena({ route, navigation }) {
             const data = JSON.parse(event.data);
             const myTag = myGamerTagRef.current;
 
+            // 🔴 BUG FIX 1: Instant Handshake to Sync Names
+            if (data.action === 'player_joined' && data.player !== myTag && data.player !== "Live_Player") {
+                sendMyScore(myPointsRef.current); 
+            }
+
             if (data.action === 'questions_ready') {
                 if (data.content.is_typing_test) {
-                    setIsTypingMode(true);
-                    setTargetParagraph(data.content.paragraph);
-                    setTimeLeft(data.content.time_limit);
+                    setIsTypingMode(true); setTargetParagraph(data.content.paragraph); setTimeLeft(data.content.time_limit);
                 } else {
-                    setIsTypingMode(false);
-                    setQuestions(data.content.questions);
-                    setTimePerQ(data.content.time_per_question);
-                    setTimeLeft(data.content.time_per_question);
+                    setIsTypingMode(false); setQuestions(data.content.questions); setTimePerQ(data.content.time_per_question); setTimeLeft(data.content.time_per_question);
                 }
-                setTimeout(() => {
-                    setGameState("playing");
-                    typingStartTime.current = Date.now();
-                }, 1500); 
+                setTimeout(() => { setGameState("playing"); typingStartTime.current = Date.now(); }, 1500); 
             }
 
             if (data.action === 'score_update' && data.player && data.player !== myTag && data.player !== "Live_Player") {
-                let isNewPlayer = false;
                 updateOpponents(prev => {
                     const existing = prev.find(o => o.name === data.player);
                     if (existing) {
                         return prev.map(o => o.name === data.player ? { ...o, score: data.score } : o);
                     } else {
-                        if (gameStateRef.current === "searching" && prev.length < maxPlayersRef.current - 1) {
-                            isNewPlayer = true;
-                            return [...prev, { name: data.player, score: data.score, isBot: false }];
-                        }
-                        return prev;
+                        return [...prev, { name: data.player, score: data.score, isBot: false }];
                     }
                 });
-
-                if (isNewPlayer && gameStateRef.current === "searching") {
-                    setSearchTime(60); 
-                    setTimeout(() => sendMyScore(myPointsRef.current), 500); 
-                }
             }
 
             if (data.action === 'waiting_for_opponent') setGameState("waiting_result");
@@ -219,7 +186,6 @@ export default function Arena({ route, navigation }) {
     return () => { if (ws.current) ws.current.close(); };
   }, []);
 
-  // 🚀 2. BOTS & MATCHMAKING
   useEffect(() => {
     if (gameState !== "searching") return;
     searchIntervalRef.current = setInterval(() => {
@@ -232,19 +198,18 @@ export default function Arena({ route, navigation }) {
   }, [gameState]);
 
   useEffect(() => {
+      // 🔴 BUG FIX 2: 1.5 Second delay before match starts so players can see names
       if (gameState === "searching" && opponents.length === maxPlayers - 1 && maxPlayers > 1) {
-          clearInterval(searchIntervalRef.current); triggerMatchFound();
+          clearInterval(searchIntervalRef.current); 
+          setTimeout(() => { triggerMatchFound(); }, 1500);
       }
   }, [opponents.length, gameState, maxPlayers]);
 
-  // 🌟 NAYA: Web Jaisa Smart Bot Name Generator
   const generateBotName = () => {
       const firstNames = ["Rahul", "Neha", "Vikas", "Priya", "Aman", "Rohit", "Pooja", "Sonu", "Monu", "Jaat", "Desi", "Gamer", "Pro", "Ninja", "King", "Queen", "Ankit", "Komal"];
       const suffixes = ["OP", "Pro", "Kill", "Sniper", "Don", "Hry", "Boy", "Girl", "Boss", "007", "X", "Max", "YT"];
-      
       const type = Math.floor(Math.random() * 3); 
       const fName = firstNames[Math.floor(Math.random() * firstNames.length)];
-      
       if (type === 0) return `${fName}${Math.floor(100 + Math.random() * 9000)}`; 
       else if (type === 1) return `${fName}_${suffixes[Math.floor(Math.random() * suffixes.length)]}`; 
       else return `${fName}${Math.floor(10 + Math.random() * 90)}`; 
@@ -255,9 +220,7 @@ export default function Arena({ route, navigation }) {
           let newOpp = [...prev];
           while (newOpp.length < maxPlayersRef.current - 1) {
               let newName = generateBotName();
-              while(newOpp.some(o => o.name === newName) || newName === myGamerTagRef.current) {
-                  newName = generateBotName();
-              }
+              while(newOpp.some(o => o.name === newName) || newName === myGamerTagRef.current) newName = generateBotName();
               newOpp.push({ name: newName, score: 0, isBot: true });
           }
           return newOpp;
@@ -270,17 +233,15 @@ export default function Arena({ route, navigation }) {
           ws.current.send(JSON.stringify({ action: 'request_questions' }));
       }
       setGameState("found");
-      playSound('match-found.mp3'); // 🎵 Play Sound
+      playSound('match-found.mp3'); 
   };
 
-  // 🚀 3. GAMEPLAY TIMER
   useEffect(() => {
     if (gameState !== "playing") return;
     if (timeLeft > 0) {
       const timer = setTimeout(() => {
         setTimeLeft(timeLeft - 1);
-        
-        if (timeLeft <= 5 && timeLeft > 0) playSound('tick.mp3'); // 🎵 Play Tick Sound
+        if (timeLeft <= 5 && timeLeft > 0) playSound('tick.mp3'); 
         
         updateOpponents(prev => prev.map(opp => {
              if (opp.isBot) {
@@ -299,54 +260,32 @@ export default function Arena({ route, navigation }) {
     }
   }, [gameState, timeLeft, isTypingMode]);
 
-  // 🌟 NAYA: Web jaisa Accuracy Data collect karna
   const handleAnswerClick = (selectedOption) => {
     const currentQ = questions[currentQIndex];
     const dbAnswer = currentQ.answer.toUpperCase().trim();
     const selectedIndex = currentQ.options.indexOf(selectedOption);
     const selectedLetter = ["A", "B", "C", "D"][selectedIndex];
-
     const isCorrect = selectedLetter === dbAnswer;
     
-    // 🎵 Play SFX based on correctness
-    if (isCorrect) playSound('correct.mp3');
-    else playSound('wrong.mp3');
+    if (isCorrect) playSound('correct.mp3'); else playSound('wrong.mp3');
 
     const earnedPoints = isCorrect ? (10 + timeLeft) : 0; 
-    
-    // Save answer for review UI
-    setUserAnswers(prev => [...prev, { 
-      question: currentQ.question, 
-      userAnswer: selectedOption, 
-      correctAnswer: currentQ.options[["A", "B", "C", "D"].indexOf(dbAnswer)],
-      isCorrect: isCorrect 
-    }]);
+    setUserAnswers(prev => [...prev, { question: currentQ.question, userAnswer: selectedOption, correctAnswer: currentQ.options[["A", "B", "C", "D"].indexOf(dbAnswer)], isCorrect: isCorrect }]);
 
     const updatedMyPoints = myPoints + earnedPoints;
-    setMyPoints(updatedMyPoints);
-    sendMyScore(updatedMyPoints); 
+    setMyPoints(updatedMyPoints); sendMyScore(updatedMyPoints); 
     handleNextQuestion(updatedMyPoints, selectedOption);
   };
 
   const handleNextQuestion = (finalMyPoints, selectedOption = null) => {
-    // Agar time out ho gaya
     if (!selectedOption && !isTypingMode && questions.length > 0) {
         playSound('wrong.mp3'); 
         const currentQ = questions[currentQIndex];
-        setUserAnswers(prev => [...prev, { 
-            question: currentQ.question, 
-            userAnswer: "Time Out", 
-            correctAnswer: currentQ.options[["A", "B", "C", "D"].indexOf(currentQ.answer)],
-            isCorrect: false 
-        }]);
+        setUserAnswers(prev => [...prev, { question: currentQ.question, userAnswer: "Time Out", correctAnswer: currentQ.options[["A", "B", "C", "D"].indexOf(currentQ.answer)], isCorrect: false }]);
     }
-
     if (currentQIndex + 1 < questions.length) {
-      setCurrentQIndex(currentQIndex + 1);
-      setTimeLeft(timePerQ); 
-    } else {
-      triggerRefereeSubmit(finalMyPoints); 
-    }
+      setCurrentQIndex(currentQIndex + 1); setTimeLeft(timePerQ); 
+    } else { triggerRefereeSubmit(finalMyPoints); }
   };
 
   const handleTypingChange = (val) => {
@@ -355,86 +294,53 @@ export default function Arena({ route, navigation }) {
     const words = val.trim().split(/\s+/).length;
     const currentWpm = val.length > 0 ? Math.round(words / (timeElapsedMins || 0.01)) : 0;
     setWpm(currentWpm);
-
     const cleanTarget = targetParagraph.replace(/[^a-zA-Z0-9]/g, '');
     const cleanTyped = val.replace(/[^a-zA-Z0-9]/g, '');
-
     let correctChars = 0;
-    for (let i = 0; i < cleanTyped.length; i++) {
-      if (i < cleanTarget.length && cleanTyped[i] === cleanTarget[i]) correctChars++;
-    }
+    for (let i = 0; i < cleanTyped.length; i++) { if (i < cleanTarget.length && cleanTyped[i] === cleanTarget[i]) correctChars++; }
     const currentAccuracy = cleanTyped.length > 0 ? Math.round((correctChars / cleanTyped.length) * 100) : 100;
     setAccuracy(currentAccuracy);
-
     const currentPoints = val.length > 0 ? currentWpm + currentAccuracy : 0;
-    setMyPoints(currentPoints);
-    sendMyScore(currentPoints); 
-
+    setMyPoints(currentPoints); sendMyScore(currentPoints); 
     if (cleanTyped === cleanTarget && cleanTarget.length > 0) triggerRefereeSubmit(currentPoints);
   };
 
-  // 🚀 4. SUBMIT TO REFEREE
   const triggerRefereeSubmit = (finalMyPts) => {
     if (hasSubmitted.current) return;
     hasSubmitted.current = true; 
     setGameState("waiting_result"); 
-
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
         ws.current.send(JSON.stringify({ action: 'game_finished', player_name: myGamerTagRef.current, score: finalMyPts, wpm: wpmRef.current }));
-        opponentsRef.current.forEach(opp => {
-            if (opp.isBot) ws.current.send(JSON.stringify({ action: 'game_finished', player_name: opp.name, score: opp.score, wpm: 0 }));
-        });
+        opponentsRef.current.forEach(opp => { if (opp.isBot) ws.current.send(JSON.stringify({ action: 'game_finished', player_name: opp.name, score: opp.score, wpm: 0 })); });
     }
   };
 
-  // 🚀 5. FINAL RESULTS API (SECURE FIX)
   const handleMatchResult = async (data) => {
       if (apiCalled.current) return;
       apiCalled.current = true;
-      setGameState("finished");
-      setApiLoading(true);
+      setGameState("waiting_result"); setApiLoading(true);
 
       const myTag = myGamerTagRef.current;
-      let cStatus = 'LOSS';
-      if (data.is_draw) cStatus = 'DRAW';
-      else if (data.winners.includes(myTag)) cStatus = 'WIN';
-      
-      setMatchStatus(cStatus);
-
-      // 🎵 Win or Lose Sound
-      if (cStatus === 'WIN') playSound('win.mp3');
-      else playSound('lose.mp3'); 
-
-      const finalStandings = Object.entries(data.final_scores).map(([name, stats]) => ({
-          name, score: stats.score, isMe: name === myTag
-      })).sort((a, b) => b.score - a.score);
-
+      const finalStandings = Object.entries(data.final_scores).map(([name, stats]) => ({ name, score: stats.score, isMe: name === myTag })).sort((a, b) => b.score - a.score);
       let currentRank = 1;
-      finalStandings.forEach((p, idx) => {
-          if (idx > 0 && p.score < finalStandings[idx-1].score) currentRank = idx + 1;
-          p.rank = currentRank;
-      });
+      finalStandings.forEach((p, idx) => { if (idx > 0 && p.score < finalStandings[idx-1].score) currentRank = idx + 1; p.rank = currentRank; });
       setMatchStandings(finalStandings);
 
       try {
           const token = await AsyncStorage.getItem('access_token');
-          // 🔴 SECURE FIX: Only send table_id & room_id. Backend will verify score from cache.
-          const res = await axios.post(`${API_BASE}/api/game/submit-result/`, { 
-              table_id: tableId, 
-              room_id: matchRoomIdRef.current 
-          }, { headers: { Authorization: `Bearer ${token}` } });
-          
-          setMatchReward(res.data.prize_won || 0); 
+          const res = await axios.post(`${API_BASE}/api/game/submit-result/`, { table_id: tableId, room_id: matchRoomIdRef.current }, { headers: { Authorization: `Bearer ${token}` } });
+          const actualStatus = res.data.match_status;
+          setMatchStatus(actualStatus); setMatchReward(res.data.prize_won || 0); 
+          if (actualStatus === 'WIN') playSound('win.mp3'); else playSound('lose.mp3'); 
+          setGameState("finished");
       } catch (error) {
-          console.error("Submission Error:", error);
-      } finally {
-          setApiLoading(false);
-      }
+          console.error("Submission Error:", error.response?.data?.error || error.message);
+          setMatchStatus('LOSS'); setMatchReward(0); setGameState("finished");
+      } finally { setApiLoading(false); }
   };
 
   return (
     <View style={styles.container}>
-      {/* 🔊 Mute/Unmute Button */}
       <TouchableOpacity onPress={() => setSoundEnabled(!soundEnabled)} style={styles.soundBtn}>
         {soundEnabled ? <Volume2 size={20} color="#94a3b8" /> : <VolumeX size={20} color="#ef4444" />}
       </TouchableOpacity>
@@ -471,6 +377,17 @@ export default function Arena({ route, navigation }) {
                </View>
             ))}
           </View>
+
+          {/* 🔴 BUG FIX 3: Timer UI Added in APK */}
+          <View style={{ marginTop: 30, alignItems: 'center' }}>
+            <View style={{ backgroundColor: 'rgba(250, 204, 21, 0.1)', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(250, 204, 21, 0.3)', flexDirection: 'row', alignItems: 'center' }}>
+              <Clock size={16} color="#facc15" />
+              <Text style={{ color: '#facc15', fontSize: 14, fontWeight: '900', letterSpacing: 1, marginLeft: 8 }}>
+                MATCH STARTS IN: {searchTime}S
+              </Text>
+            </View>
+          </View>
+
         </View>
       )}
 
@@ -505,9 +422,7 @@ export default function Arena({ route, navigation }) {
 
           {!isTypingMode && questions.length > 0 && (
             <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.questionBox}>
-                <Text style={styles.questionText}>{questions[currentQIndex].question}</Text>
-              </View>
+              <View style={styles.questionBox}><Text style={styles.questionText}>{questions[currentQIndex].question}</Text></View>
               <View style={{ gap: 12, marginTop: 20 }}>
                 {questions[currentQIndex].options.map((opt, idx) => (
                   <TouchableOpacity key={idx} style={styles.optionBtn} onPress={() => handleAnswerClick(opt)}>
@@ -527,20 +442,7 @@ export default function Arena({ route, navigation }) {
               </View>
               <View style={styles.typingBox}>
                 <Text style={styles.targetParagraph}>{targetParagraph}</Text>
-                <TextInput 
-                  style={styles.typingInput}
-                  multiline
-                  autoFocus
-                  autoCorrect={false}
-                  spellCheck={false}
-                  autoComplete="off"
-                  autoCapitalize="none"
-                  keyboardType="visible-password"
-                  placeholder="Start typing here..."
-                  placeholderTextColor="#475569"
-                  value={typedText}
-                  onChangeText={handleTypingChange}
-                />
+                <TextInput style={styles.typingInput} multiline autoFocus autoCorrect={false} spellCheck={false} autoComplete="off" autoCapitalize="none" keyboardType="visible-password" placeholder="Start typing here..." placeholderTextColor="#475569" value={typedText} onChangeText={handleTypingChange} />
               </View>
             </ScrollView>
           )}
@@ -559,9 +461,7 @@ export default function Arena({ route, navigation }) {
         <ScrollView contentContainerStyle={{flexGrow: 1, justifyContent: 'center', paddingVertical: 40}} showsVerticalScrollIndicator={false}>
           <View style={styles.resultCard}>
             <Trophy size={60} color={matchStatus === 'WIN' ? "#34d399" : matchStatus === 'DRAW' ? "#facc15" : "#ef4444"} style={{ alignSelf: 'center', marginBottom: 10 }} />
-            <Text style={[styles.resultTitleWin, {color: matchStatus === 'WIN' ? "#34d399" : matchStatus === 'DRAW' ? "#facc15" : "#ef4444"}]}>
-              {matchStatus === 'WIN' ? "PRIZE SECURED!" : matchStatus === 'DRAW' ? "MATCH TIED" : "DEFEATED!"}
-            </Text>
+            <Text style={[styles.resultTitleWin, {color: matchStatus === 'WIN' ? "#34d399" : matchStatus === 'DRAW' ? "#facc15" : "#ef4444"}]}>{matchStatus === 'WIN' ? "PRIZE SECURED!" : matchStatus === 'DRAW' ? "MATCH TIED" : "DEFEATED!"}</Text>
             
             <View style={[styles.winningsBox, {borderColor: matchStatus === 'WIN' ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)", backgroundColor: matchStatus === 'WIN' ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)"}]}>
               <Text style={[styles.winningsLabel, {color: matchStatus === 'WIN' ? "#34d399" : "#ef4444"}]}>{matchStatus === 'WIN' ? "Winnings Added to Wallet" : matchStatus === 'DRAW' ? "Entry Fee Refunded" : "Better Luck Next Time"}</Text>
@@ -586,7 +486,6 @@ export default function Arena({ route, navigation }) {
               <Text style={styles.returnBtnText}>{apiLoading ? "SAVING..." : "RETURN TO LOBBY"}</Text>
             </TouchableOpacity>
 
-            {/* 🌟 NAYA: Web Jaisa Quiz Accuracy Review */}
             {!isTypingMode && userAnswers.length > 0 && (
               <View style={styles.reviewContainer}>
                 <Text style={styles.reviewHeader}>🎯 QUIZ ACCURACY REVIEW</Text>
@@ -594,14 +493,11 @@ export default function Arena({ route, navigation }) {
                   <View key={idx} style={[styles.reviewBox, ans.isCorrect ? styles.reviewBoxCorrect : styles.reviewBoxWrong]}>
                     <Text style={styles.reviewQuestion}>{idx + 1}. {ans.question}</Text>
                     <Text style={styles.reviewAnswer}>Your Answer: <Text style={ans.isCorrect ? styles.correctText : styles.wrongText}>{ans.userAnswer}</Text></Text>
-                    {!ans.isCorrect && (
-                      <Text style={styles.reviewCorrectAnswer}>Correct Answer: {ans.correctAnswer}</Text>
-                    )}
+                    {!ans.isCorrect && <Text style={styles.reviewCorrectAnswer}>Correct Answer: {ans.correctAnswer}</Text>}
                   </View>
                 ))}
               </View>
             )}
-
           </View>
         </ScrollView>
       )}
@@ -615,7 +511,6 @@ const styles = StyleSheet.create({
   glowTop: { position: 'absolute', top: -50, left: -50, width: 250, height: 250, backgroundColor: 'rgba(37, 99, 235, 0.15)', borderRadius: 125 },
   glowBottom: { position: 'absolute', bottom: -50, right: -50, width: 250, height: 250, backgroundColor: 'rgba(79, 70, 229, 0.15)', borderRadius: 125 },
   centerContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  
   arenaTitle: { fontSize: 24, fontWeight: '900', color: '#e2e8f0', letterSpacing: 2, marginBottom: 5 },
   loadingBox: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 40 },
   loadingText: { color: '#60a5fa', fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
@@ -629,12 +524,10 @@ const styles = StyleSheet.create({
   joinedText: { color: '#fff', fontSize: 8, fontWeight: '900' },
   playerRowWaiting: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: 'rgba(15,23,42,0.5)', padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#1e293b', borderStyle: 'dashed', marginBottom: 10 },
   playerWaitingText: { color: '#64748b', fontWeight: 'bold', fontSize: 14 },
-
   matchFoundIcon: { backgroundColor: 'rgba(16,185,129,0.1)', padding: 30, borderRadius: 100, borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)', marginBottom: 20 },
   matchFoundTitle: { fontSize: 32, fontWeight: '900', color: '#34d399', letterSpacing: 1, marginBottom: 5 },
   matchFoundSub: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1 },
   generatingText: { color: '#facc15', fontSize: 12, fontWeight: '900', marginTop: 30 },
-
   gameContainer: { flex: 1, paddingTop: 40 },
   scoreBoard: { backgroundColor: 'rgba(15,23,42,0.8)', padding: 15, borderRadius: 24, borderWidth: 1, borderColor: '#1e293b', marginBottom: 20 },
   timerBadge: { position: 'absolute', top: -15, alignSelf: 'center', backgroundColor: '#020617', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 15, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: '#334155' },
@@ -646,19 +539,16 @@ const styles = StyleSheet.create({
   scoreValueMe: { color: '#60a5fa', fontSize: 24, fontWeight: '900' },
   scoreLabelOpp: { color: '#64748b', fontSize: 10, fontWeight: '900', letterSpacing: 1 },
   scoreValueOpp: { color: '#cbd5e1', fontSize: 24, fontWeight: '900' },
-  
   questionBox: { backgroundColor: '#1e293b', padding: 25, borderRadius: 20, borderWidth: 1, borderColor: '#334155', minHeight: 120, justifyContent: 'center' },
   questionText: { color: '#f8fafc', fontSize: 16, fontWeight: 'bold', textAlign: 'center', lineHeight: 24 },
   optionBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(15,23,42,0.6)', padding: 15, borderRadius: 16, borderWidth: 1, borderColor: '#1e293b' },
   optionLetter: { backgroundColor: '#020617', width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#334155', marginRight: 15 },
   optionLetterText: { color: '#3b82f6', fontWeight: '900' },
   optionText: { color: '#cbd5e1', fontSize: 15, fontWeight: 'bold', flex: 1 },
-
   typingHeader: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#0f172a', padding: 12, borderRadius: 12, marginBottom: 15 },
   typingBox: { backgroundColor: '#1e293b', padding: 20, borderRadius: 20, borderWidth: 1, borderColor: '#334155' },
   targetParagraph: { color: '#94a3b8', fontSize: 16, lineHeight: 24, marginBottom: 20 },
   typingInput: { backgroundColor: '#020617', color: '#fff', fontSize: 16, padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#3b82f6', minHeight: 100, textAlignVertical: 'top' },
-
   resultCard: { backgroundColor: 'rgba(15,23,42,0.9)', padding: 25, borderRadius: 30, borderWidth: 1, borderColor: '#1e293b', width: '100%' },
   resultTitleWin: { fontSize: 28, fontWeight: '900', textAlign: 'center', marginBottom: 20 },
   winningsBox: { borderWidth: 1, padding: 15, borderRadius: 16, alignItems: 'center', marginBottom: 25 },
@@ -673,8 +563,6 @@ const styles = StyleSheet.create({
   lbScore: { color: '#34d399', fontWeight: '900', fontFamily: 'monospace', fontSize: 16 },
   returnBtn: { backgroundColor: '#2563eb', padding: 18, borderRadius: 16, alignItems: 'center' },
   returnBtnText: { color: '#fff', fontWeight: '900', letterSpacing: 1 },
-
-  // 🌟 NAYA STYLES: Accuracy Review UI
   reviewContainer: { marginTop: 25, width: '100%' },
   reviewHeader: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', textAlign: 'center', marginBottom: 15, letterSpacing: 1 },
   reviewBox: { padding: 15, borderRadius: 16, borderWidth: 1, marginBottom: 10 },
