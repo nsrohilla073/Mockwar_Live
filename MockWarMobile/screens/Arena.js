@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView, TextInput, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Clock, Trophy, User, Swords, Users, Zap, Crosshair } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,11 +9,12 @@ const API_BASE = "https://mockwar-backend.onrender.com";
 const WS_BASE = "wss://mockwar-backend.onrender.com";
 
 export default function Arena({ route, navigation }) {
-  const { tableId } = route.params; 
+  const { tableId } = route.params; // Lobby se bheja gaya Table ID
   
   const hasSubmitted = useRef(false); 
   const apiCalled = useRef(false);
 
+  // States
   const [maxPlayers, setMaxPlayers] = useState(2); 
   const maxPlayersRef = useRef(2); 
   const [gameState, setGameState] = useState("searching"); 
@@ -27,6 +27,7 @@ export default function Arena({ route, navigation }) {
   const [timePerQ, setTimePerQ] = useState(12); 
   const [apiLoading, setApiLoading] = useState(false);
 
+  // Scoreboard & WebSocket
   const [myPoints, setMyPoints] = useState(0);
   const myPointsRef = useRef(0);
   const myGamerTagRef = useRef("Live_Player"); 
@@ -48,9 +49,6 @@ export default function Arena({ route, navigation }) {
   const [accuracy, setAccuracy] = useState(100);
   const accuracyRef = useRef(100);
   const typingStartTime = useRef(null);
-  
-  // 🔴 FIX 2: QA Review Track karne ke liye
-  const [userAnswers, setUserAnswers] = useState([]);
 
   const updateOpponents = (newOppFunc) => {
       setOpponents(prev => {
@@ -75,6 +73,7 @@ export default function Arena({ route, navigation }) {
       }
   };
 
+  // 🚀 1. INITIALIZE GAME & WEBSOCKET
   useEffect(() => {
     const initGame = async () => {
       try {
@@ -84,7 +83,9 @@ export default function Arena({ route, navigation }) {
         const profRes = await axios.get(`${API_BASE}/api/user/profile/`, { headers: { Authorization: `Bearer ${token}` } });
         myGamerTagRef.current = profRes.data.gamer_tag;
 
-        const res = await axios.get(`${API_BASE}/api/game/content/${tableId}/`, { headers: { Authorization: `Bearer ${token}` } });
+        const res = await axios.get(`${API_BASE}/api/game/content/${tableId}/`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
         
         const tableLimit = res.data.max_players || 2;
         setMaxPlayers(tableLimit);
@@ -93,8 +94,12 @@ export default function Arena({ route, navigation }) {
 
         const matchRoomId = res.data.room_id || `room_${Date.now()}`;
         
+        // Connect to WebSocket
         ws.current = new WebSocket(`${WS_BASE}/ws/arena/${tableId}/${matchRoomId}/`);
-        ws.current.onopen = () => { sendMyScore(0); };
+        
+        ws.current.onopen = () => {
+            sendMyScore(0); 
+        };
 
         ws.current.onmessage = (event) => {
             const data = JSON.parse(event.data);
@@ -111,15 +116,20 @@ export default function Arena({ route, navigation }) {
                     setTimePerQ(data.content.time_per_question);
                     setTimeLeft(data.content.time_per_question);
                 }
-                setTimeout(() => { setGameState("playing"); typingStartTime.current = Date.now(); }, 1500); 
+                
+                setTimeout(() => {
+                    setGameState("playing");
+                    typingStartTime.current = Date.now();
+                }, 1500); 
             }
 
             if (data.action === 'score_update' && data.player && data.player !== myTag && data.player !== "Live_Player") {
                 let isNewPlayer = false;
                 updateOpponents(prev => {
                     const existing = prev.find(o => o.name === data.player);
-                    if (existing) { return prev.map(o => o.name === data.player ? { ...o, score: data.score } : o); } 
-                    else {
+                    if (existing) {
+                        return prev.map(o => o.name === data.player ? { ...o, score: data.score } : o);
+                    } else {
                         if (gameStateRef.current === "searching" && prev.length < maxPlayersRef.current - 1) {
                             isNewPlayer = true;
                             return [...prev, { name: data.player, score: data.score, isBot: false }];
@@ -127,24 +137,34 @@ export default function Arena({ route, navigation }) {
                         return prev;
                     }
                 });
+
                 if (isNewPlayer && gameStateRef.current === "searching") {
                     setSearchTime(60); 
                     setTimeout(() => sendMyScore(myPointsRef.current), 500); 
                 }
             }
 
-            if (data.action === 'waiting_for_opponent') setGameState("waiting_result");
-            if (data.action === 'match_result') handleMatchResult(data);
+            if (data.action === 'waiting_for_opponent') {
+                setGameState("waiting_result");
+            }
+
+            if (data.action === 'match_result') {
+                handleMatchResult(data);
+            }
         };
+
       } catch (error) {
+        console.error("Init Error:", error);
         Alert.alert("Error", "Could not connect to Arena.");
         navigation.navigate("Lobby");
       }
     };
+    
     initGame();
     return () => { if (ws.current) ws.current.close(); };
   }, []);
 
+  // 🚀 2. BOTS & MATCHMAKING
   useEffect(() => {
     if (gameState !== "searching") return;
     searchIntervalRef.current = setInterval(() => {
@@ -186,11 +206,13 @@ export default function Arena({ route, navigation }) {
       setGameState("found");
   };
 
+  // 🚀 3. GAMEPLAY TIMER
   useEffect(() => {
     if (gameState !== "playing") return;
     if (timeLeft > 0) {
       const timer = setTimeout(() => {
         setTimeLeft(timeLeft - 1);
+        
         updateOpponents(prev => prev.map(opp => {
              if (opp.isBot) {
                  if (Math.random() < 0.20) return opp; 
@@ -211,21 +233,16 @@ export default function Arena({ route, navigation }) {
   const handleAnswerClick = (selectedOption) => {
     const currentQ = questions[currentQIndex];
     const dbAnswer = currentQ.answer.toUpperCase().trim();
-    const isCorrect = ['A', 'B', 'C', 'D'][currentQ.options.indexOf(selectedOption)] === dbAnswer;
+    const selectedIndex = currentQ.options.indexOf(selectedOption);
+    const selectedLetter = ["A", "B", "C", "D"][selectedIndex];
+
+    const isCorrect = selectedLetter === dbAnswer;
     const earnedPoints = isCorrect ? (10 + timeLeft) : 0; 
     
-    // 🔴 FIX 2: Save answer for Review
-    setUserAnswers(prev => [...prev, { 
-      question: currentQ.question, 
-      userAnswer: selectedOption, 
-      correctAnswer: currentQ.options[['A', 'B', 'C', 'D'].indexOf(dbAnswer)],
-      isCorrect: isCorrect 
-    }]);
-
     const updatedMyPoints = myPoints + earnedPoints;
     setMyPoints(updatedMyPoints);
     sendMyScore(updatedMyPoints); 
-    handleNextQuestion(updatedMyPoints);
+    handleNextQuestion(updatedMyPoints, selectedOption);
   };
 
   const handleNextQuestion = (finalMyPoints) => {
@@ -263,40 +280,23 @@ export default function Arena({ route, navigation }) {
     }
   };
 
+  // 🚀 4. SUBMIT TO REFEREE
   const triggerRefereeSubmit = (finalMyPts) => {
     if (hasSubmitted.current) return;
     hasSubmitted.current = true; 
     setGameState("waiting_result"); 
 
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-        // 1. Sabse pehle aapka (Real Player) ka score jayega
-        ws.current.send(JSON.stringify({ 
-            action: 'game_finished', 
-            player_name: myGamerTagRef.current, 
-            score: finalMyPts, 
-            wpm: wpmRef.current 
-        }));
-
-        // 🔴 2. TRAFFIC POLICE FIX: Bots ke scores 300-300 ms ke gap par jayenge
-        let delay = 300;
-        opponentsRef.current.forEach((opp) => {
-            if (opp.isBot) { 
-                setTimeout(() => {
-                    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-                        ws.current.send(JSON.stringify({ 
-                            action: 'game_finished', 
-                            player_name: opp.name, 
-                            score: opp.score, 
-                            wpm: 0 
-                        }));
-                    }
-                }, delay);
-                delay += 300; // Har bot ko line me thoda aage badhate raho
+        ws.current.send(JSON.stringify({ action: 'game_finished', player_name: myGamerTagRef.current, score: finalMyPts, wpm: wpmRef.current }));
+        opponentsRef.current.forEach(opp => {
+            if (opp.isBot) {
+                ws.current.send(JSON.stringify({ action: 'game_finished', player_name: opp.name, score: opp.score, wpm: 0 }));
             }
         });
     }
   };
 
+  // 🚀 5. FINAL RESULTS API
   const handleMatchResult = async (data) => {
       if (apiCalled.current) return;
       apiCalled.current = true;
@@ -335,33 +335,44 @@ export default function Arena({ route, navigation }) {
   };
 
   return (
-    // 🔴 FIX 3: SafeAreaView for No Overlap
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <View style={styles.glowTop} />
       <View style={styles.glowBottom} />
 
+      {/* 🔍 SEARCHING */}
       {gameState === 'searching' && (
         <View style={styles.centerContent}>
           <Text style={styles.arenaTitle}>SECURING ARENA</Text>
-          <View style={styles.loadingBox}><ActivityIndicator size="small" color="#3b82f6" /><Text style={styles.loadingText}> MATCHMAKING ACTIVE</Text></View>
+          <View style={styles.loadingBox}>
+            <ActivityIndicator size="small" color="#3b82f6" />
+            <Text style={styles.loadingText}> MATCHMAKING ACTIVE</Text>
+          </View>
           <View style={styles.card}>
-            <View style={styles.cardHeader}><Users size={16} color="#94a3b8" /><Text style={styles.cardHeaderText}> Players in Lobby ({opponents.length + 1}/{maxPlayers})</Text></View>
-            <View style={styles.playerRowMe}><View style={{flexDirection: 'row', alignItems: 'center'}}><User size={16} color="#60a5fa" /><Text style={styles.playerNameMe}> YOU</Text></View><View style={styles.joinedBadge}><Text style={styles.joinedText}>JOINED</Text></View></View>
+            <View style={styles.cardHeader}>
+              <Users size={16} color="#94a3b8" />
+              <Text style={styles.cardHeaderText}> Players in Lobby ({opponents.length + 1}/{maxPlayers})</Text>
+            </View>
+            <View style={styles.playerRowMe}>
+              <View style={{flexDirection: 'row', alignItems: 'center'}}><User size={16} color="#60a5fa" /><Text style={styles.playerNameMe}> YOU</Text></View>
+              <View style={styles.joinedBadge}><Text style={styles.joinedText}>JOINED</Text></View>
+            </View>
             {opponents.map((opp, idx) => (
-              <View key={idx} style={styles.playerRowOpp}><Text style={{color: '#fff', fontWeight: 'bold'}}>{opp.name}</Text><View style={[styles.joinedBadge, {backgroundColor: '#10b981'}]}><Text style={styles.joinedText}>JOINED</Text></View></View>
+              <View key={idx} style={styles.playerRowOpp}>
+                <Text style={{color: '#fff', fontWeight: 'bold'}}>{opp.name}</Text>
+                <View style={[styles.joinedBadge, {backgroundColor: '#10b981'}]}><Text style={styles.joinedText}>JOINED</Text></View>
+              </View>
             ))}
             {Array.from({ length: Math.max(0, maxPlayers - 1 - opponents.length) }).map((_, idx) => (
-               <View key={'w'+idx} style={styles.playerRowWaiting}><Text style={styles.playerWaitingText}>Waiting for opponent...</Text><ActivityIndicator size="small" color="#475569" /></View>
+               <View key={'w'+idx} style={styles.playerRowWaiting}>
+                 <Text style={styles.playerWaitingText}>Waiting for opponent...</Text>
+                 <ActivityIndicator size="small" color="#475569" />
+               </View>
             ))}
-          </View>
-          {/* 🔴 FIX 1: Matchmaking Timer added back */}
-          <View style={{ marginTop: 20, alignItems: 'center', flexDirection: 'row', gap: 5 }}>
-            <Clock size={14} color="#facc15" />
-            <Text style={{ color: '#facc15', fontSize: 12, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1 }}>Match starts in: {searchTime}s</Text>
           </View>
         </View>
       )}
 
+      {/* ⚔️ MATCH FOUND */}
       {gameState === 'found' && (
         <View style={styles.centerContent}>
           <View style={styles.matchFoundIcon}><Swords size={60} color="#34d399" /></View>
@@ -371,21 +382,32 @@ export default function Arena({ route, navigation }) {
         </View>
       )}
 
+      {/* 🎮 PLAYING */}
       {gameState === 'playing' && (
         <View style={styles.gameContainer}>
           <View style={styles.scoreBoard}>
-            <View style={styles.timerBadge}><Clock size={16} color={timeLeft <= 5 ? "#ef4444" : "#facc15"} /><Text style={[styles.timerText, timeLeft <= 5 && { color: "#ef4444" }]}> {timeLeft}s</Text></View>
+            <View style={styles.timerBadge}>
+              <Clock size={16} color={timeLeft <= 5 ? "#ef4444" : "#facc15"} />
+              <Text style={[styles.timerText, timeLeft <= 5 && { color: "#ef4444" }]}> {timeLeft}s</Text>
+            </View>
             <View style={styles.scoreCards}>
-              <LinearGradient colors={['#1e3a8a', '#0f172a']} style={styles.scoreCardMe}><Text style={styles.scoreLabelMe}>YOU</Text><Text style={styles.scoreValueMe}>{myPoints}</Text></LinearGradient>
+              <LinearGradient colors={['#1e3a8a', '#0f172a']} style={styles.scoreCardMe}>
+                <Text style={styles.scoreLabelMe}>YOU</Text><Text style={styles.scoreValueMe}>{myPoints}</Text>
+              </LinearGradient>
               {opponents.map((opp, idx) => (
-                <View key={idx} style={styles.scoreCardOpp}><Text style={styles.scoreLabelOpp} numberOfLines={1}>{opp.name}</Text><Text style={styles.scoreValueOpp}>{opp.score}</Text></View>
+                <View key={idx} style={styles.scoreCardOpp}>
+                  <Text style={styles.scoreLabelOpp} numberOfLines={1}>{opp.name}</Text>
+                  <Text style={styles.scoreValueOpp}>{opp.score}</Text>
+                </View>
               ))}
             </View>
           </View>
 
           {!isTypingMode && questions.length > 0 && (
             <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.questionBox}><Text style={styles.questionText}>{questions[currentQIndex].question}</Text></View>
+              <View style={styles.questionBox}>
+                <Text style={styles.questionText}>{questions[currentQIndex].question}</Text>
+              </View>
               <View style={{ gap: 12, marginTop: 20 }}>
                 {questions[currentQIndex].options.map((opt, idx) => (
                   <TouchableOpacity key={idx} style={styles.optionBtn} onPress={() => handleAnswerClick(opt)}>
@@ -399,25 +421,44 @@ export default function Arena({ route, navigation }) {
 
           {isTypingMode && (
             <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.typingHeader}><Text style={{color: '#c084fc', fontWeight: 'bold'}}><Zap size={14}/> {wpm} WPM</Text><Text style={{color: '#34d399', fontWeight: 'bold'}}><Crosshair size={14}/> {accuracy}%</Text></View>
+              <View style={styles.typingHeader}>
+                 <Text style={{color: '#c084fc', fontWeight: 'bold'}}><Zap size={14}/> {wpm} WPM</Text>
+                 <Text style={{color: '#34d399', fontWeight: 'bold'}}><Crosshair size={14}/> {accuracy}%</Text>
+              </View>
               <View style={styles.typingBox}>
                 <Text style={styles.targetParagraph}>{targetParagraph}</Text>
-                <TextInput style={styles.typingInput} multiline autoFocus placeholder="Start typing here..." placeholderTextColor="#475569" value={typedText} onChangeText={handleTypingChange} />
+                <TextInput 
+                  style={styles.typingInput}
+                  multiline
+                  autoFocus
+                  placeholder="Start typing here..."
+                  placeholderTextColor="#475569"
+                  value={typedText}
+                  onChangeText={handleTypingChange}
+                />
               </View>
             </ScrollView>
           )}
         </View>
       )}
 
+      {/* ⏳ WAITING RESULT */}
       {gameState === 'waiting_result' && (
-        <View style={styles.centerContent}><ActivityIndicator size="large" color="#3b82f6" /><Text style={styles.arenaTitle}>Awaiting Referee</Text><Text style={styles.playerWaitingText}>Waiting for opponent to finish...</Text></View>
+        <View style={styles.centerContent}>
+          <ActivityIndicator size="large" color="#3b82f6" />
+          <Text style={styles.arenaTitle}>Awaiting Referee</Text>
+          <Text style={styles.playerWaitingText}>Waiting for opponent to finish...</Text>
+        </View>
       )}
 
+      {/* 🏆 FINISHED */}
       {gameState === 'finished' && (
-        <ScrollView contentContainerStyle={{flexGrow: 1, justifyContent: 'center', paddingVertical: 20}} showsVerticalScrollIndicator={false}>
+        <View style={styles.centerContent}>
           <View style={styles.resultCard}>
             <Trophy size={60} color={matchStatus === 'WIN' ? "#34d399" : matchStatus === 'DRAW' ? "#facc15" : "#ef4444"} style={{ alignSelf: 'center', marginBottom: 10 }} />
-            <Text style={[styles.resultTitleWin, {color: matchStatus === 'WIN' ? "#34d399" : matchStatus === 'DRAW' ? "#facc15" : "#ef4444"}]}>{matchStatus === 'WIN' ? "PRIZE SECURED!" : matchStatus === 'DRAW' ? "MATCH TIED" : "DEFEATED!"}</Text>
+            <Text style={[styles.resultTitleWin, {color: matchStatus === 'WIN' ? "#34d399" : matchStatus === 'DRAW' ? "#facc15" : "#ef4444"}]}>
+              {matchStatus === 'WIN' ? "PRIZE SECURED!" : matchStatus === 'DRAW' ? "MATCH TIED" : "DEFEATED!"}
+            </Text>
             
             <View style={[styles.winningsBox, {borderColor: matchStatus === 'WIN' ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)", backgroundColor: matchStatus === 'WIN' ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)"}]}>
               <Text style={[styles.winningsLabel, {color: matchStatus === 'WIN' ? "#34d399" : "#ef4444"}]}>{matchStatus === 'WIN' ? "Winnings Added to Wallet" : matchStatus === 'DRAW' ? "Entry Fee Refunded" : "Better Luck Next Time"}</Text>
@@ -426,7 +467,9 @@ export default function Arena({ route, navigation }) {
 
             <View style={styles.leaderboardBox}>
               <Text style={styles.lbHeader}>LIVE MATCH RESULTS</Text>
-              {apiLoading ? ( <ActivityIndicator size="small" color="#3b82f6" style={{padding: 20}}/> ) : (
+              {apiLoading ? (
+                 <ActivityIndicator size="small" color="#3b82f6" style={{padding: 20}}/>
+              ) : (
                 matchStandings.map((player, idx) => (
                   <View key={idx} style={styles.lbRow}>
                     <Text style={[styles.lbRank, player.isMe && {color: '#facc15'}]}>#{player.rank}</Text>
@@ -441,41 +484,27 @@ export default function Arena({ route, navigation }) {
               <Text style={styles.returnBtnText}>{apiLoading ? "SAVING..." : "RETURN TO LOBBY"}</Text>
             </TouchableOpacity>
           </View>
-
-          {/* 🔴 FIX 2: QA Accuracy Review Section Added Back */}
-          {!isTypingMode && userAnswers.length > 0 && (
-            <View style={styles.reviewBox}>
-              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 15, gap: 5}}>
-                <Crosshair size={16} color="#94a3b8" />
-                <Text style={styles.reviewHeader}>Quiz Accuracy Review</Text>
-              </View>
-              {userAnswers.map((ans, idx) => (
-                <View key={idx} style={[styles.reviewCard, { borderColor: ans.isCorrect ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)', backgroundColor: ans.isCorrect ? 'rgba(16,185,129,0.05)' : 'rgba(239,68,68,0.05)' }]}>
-                  <Text style={styles.reviewQText}>{idx + 1}. {ans.question}</Text>
-                  <Text style={styles.reviewAnsText}>Your Answer: <Text style={{color: ans.isCorrect ? '#34d399' : '#ef4444'}}>{ans.userAnswer}</Text></Text>
-                  {!ans.isCorrect && <Text style={styles.reviewCorrectText}>Correct: {ans.correctAnswer}</Text>}
-                </View>
-              ))}
-            </View>
-          )}
-
-        </ScrollView>
+        </View>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
+// 🎨 STYLESHEET
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
+  container: { flex: 1, backgroundColor: '#020617', padding: 15 },
   glowTop: { position: 'absolute', top: -50, left: -50, width: 250, height: 250, backgroundColor: 'rgba(37, 99, 235, 0.15)', borderRadius: 125 },
   glowBottom: { position: 'absolute', bottom: -50, right: -50, width: 250, height: 250, backgroundColor: 'rgba(79, 70, 229, 0.15)', borderRadius: 125 },
-  centerContent: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 15 },
+  centerContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  
   arenaTitle: { fontSize: 24, fontWeight: '900', color: '#e2e8f0', letterSpacing: 2, marginBottom: 5 },
   loadingBox: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 40 },
   loadingText: { color: '#60a5fa', fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
   card: { backgroundColor: 'rgba(15, 23, 42, 0.8)', padding: 20, borderRadius: 24, borderWidth: 1, borderColor: '#1e293b', width: '100%' },
   cardHeader: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#1e293b', paddingBottom: 15, marginBottom: 15 },
-  cardHeaderText: { color: '#94a3b8', fontSize: 12, fontWeight: '900', letterSpacing: 1, flex: 1 },
+  cardHeaderText: { color: '#94a3b8', fontSize: 12, fontWeight: '900', letterSpacing: 1 },
+  countBadge: { backgroundColor: 'rgba(59,130,246,0.1)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(59,130,246,0.3)' },
+  countText: { color: '#60a5fa', fontSize: 10, fontWeight: '900' },
   playerRowMe: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: 'rgba(59,130,246,0.1)', padding: 15, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(59,130,246,0.3)', marginBottom: 10 },
   playerRowOpp: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: 'rgba(15,23,42,0.8)', padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#1e293b', marginBottom: 10 },
   playerNameMe: { color: '#60a5fa', fontWeight: '900', fontSize: 14 },
@@ -483,12 +512,14 @@ const styles = StyleSheet.create({
   joinedText: { color: '#fff', fontSize: 8, fontWeight: '900' },
   playerRowWaiting: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: 'rgba(15,23,42,0.5)', padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#1e293b', borderStyle: 'dashed', marginBottom: 10 },
   playerWaitingText: { color: '#64748b', fontWeight: 'bold', fontSize: 14 },
+
   matchFoundIcon: { backgroundColor: 'rgba(16,185,129,0.1)', padding: 30, borderRadius: 100, borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)', marginBottom: 20 },
   matchFoundTitle: { fontSize: 32, fontWeight: '900', color: '#34d399', letterSpacing: 1, marginBottom: 5 },
   matchFoundSub: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1 },
   generatingText: { color: '#facc15', fontSize: 12, fontWeight: '900', marginTop: 30 },
-  gameContainer: { flex: 1, paddingTop: 10, paddingHorizontal: 15 },
-  scoreBoard: { backgroundColor: 'rgba(15,23,42,0.8)', padding: 15, borderRadius: 24, borderWidth: 1, borderColor: '#1e293b', marginBottom: 20, marginTop: 15 },
+
+  gameContainer: { flex: 1, paddingTop: 40 },
+  scoreBoard: { backgroundColor: 'rgba(15,23,42,0.8)', padding: 15, borderRadius: 24, borderWidth: 1, borderColor: '#1e293b', marginBottom: 20 },
   timerBadge: { position: 'absolute', top: -15, alignSelf: 'center', backgroundColor: '#020617', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 15, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: '#334155' },
   timerText: { color: '#facc15', fontWeight: '900', fontSize: 16 },
   scoreCards: { flexDirection: 'row', gap: 10, marginTop: 10 },
@@ -498,18 +529,20 @@ const styles = StyleSheet.create({
   scoreValueMe: { color: '#60a5fa', fontSize: 24, fontWeight: '900' },
   scoreLabelOpp: { color: '#64748b', fontSize: 10, fontWeight: '900', letterSpacing: 1 },
   scoreValueOpp: { color: '#cbd5e1', fontSize: 24, fontWeight: '900' },
+  
   questionBox: { backgroundColor: '#1e293b', padding: 25, borderRadius: 20, borderWidth: 1, borderColor: '#334155', minHeight: 120, justifyContent: 'center' },
   questionText: { color: '#f8fafc', fontSize: 16, fontWeight: 'bold', textAlign: 'center', lineHeight: 24 },
   optionBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(15,23,42,0.6)', padding: 15, borderRadius: 16, borderWidth: 1, borderColor: '#1e293b' },
   optionLetter: { backgroundColor: '#020617', width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#334155', marginRight: 15 },
   optionLetterText: { color: '#3b82f6', fontWeight: '900' },
   optionText: { color: '#cbd5e1', fontSize: 15, fontWeight: 'bold', flex: 1 },
+
   typingHeader: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#0f172a', padding: 12, borderRadius: 12, marginBottom: 15 },
   typingBox: { backgroundColor: '#1e293b', padding: 20, borderRadius: 20, borderWidth: 1, borderColor: '#334155' },
   targetParagraph: { color: '#94a3b8', fontSize: 16, lineHeight: 24, marginBottom: 20 },
   typingInput: { backgroundColor: '#020617', color: '#fff', fontSize: 16, padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#3b82f6', minHeight: 100, textAlignVertical: 'top' },
-  
-  resultCard: { backgroundColor: 'rgba(15,23,42,0.9)', padding: 25, borderRadius: 30, borderWidth: 1, borderColor: '#1e293b', width: '100%', marginBottom: 20 },
+
+  resultCard: { backgroundColor: 'rgba(15,23,42,0.9)', padding: 25, borderRadius: 30, borderWidth: 1, borderColor: '#1e293b', width: '100%' },
   resultTitleWin: { fontSize: 28, fontWeight: '900', textAlign: 'center', marginBottom: 20 },
   winningsBox: { borderWidth: 1, padding: 15, borderRadius: 16, alignItems: 'center', marginBottom: 25 },
   winningsLabel: { fontSize: 10, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1 },
@@ -522,12 +555,5 @@ const styles = StyleSheet.create({
   youTag: { color: '#60a5fa', fontSize: 8, backgroundColor: 'rgba(59,130,246,0.1)', paddingHorizontal: 4, overflow: 'hidden', borderRadius: 4 },
   lbScore: { color: '#34d399', fontWeight: '900', fontFamily: 'monospace', fontSize: 16 },
   returnBtn: { backgroundColor: '#2563eb', padding: 18, borderRadius: 16, alignItems: 'center' },
-  returnBtnText: { color: '#fff', fontWeight: '900', letterSpacing: 1, textAlign: 'center' },
-
-  reviewBox: { backgroundColor: '#0f172a', borderRadius: 24, borderWidth: 1, borderColor: '#1e293b', padding: 20, width: '100%' },
-  reviewHeader: { color: '#94a3b8', fontSize: 12, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1 },
-  reviewCard: { padding: 15, borderRadius: 16, borderWidth: 1, marginBottom: 10 },
-  reviewQText: { color: '#e2e8f0', fontSize: 14, fontWeight: 'bold', marginBottom: 5 },
-  reviewAnsText: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold' },
-  reviewCorrectText: { color: '#34d399', fontSize: 12, fontWeight: 'bold', marginTop: 3 }
+  returnBtnText: { color: '#fff', fontWeight: '900', letterSpacing: 1 }
 });

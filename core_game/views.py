@@ -275,19 +275,19 @@ class GetLiveTablesAPIView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+# 🔴 FIX: GetGameContent ko Table ID par set kiya
 class GetGameContentAPIView(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
-    def get(self, request, category_slug):
+    def get(self, request, table_id):
         try:
-            table = GameTable.objects.filter(category__name__iexact=category_slug.replace('-', ' ')).first()
-            if not table: table = GameTable.objects.first()
-            if not table: return Response({"error": "No tables available"}, status=status.HTTP_404_NOT_FOUND)
+            table = GameTable.objects.filter(id=table_id).first()
+            if not table: return Response({"error": "Table not found"}, status=status.HTTP_404_NOT_FOUND)
             
             max_players = table.max_players
             
             # 🎯 LOBBY MATCHMAKING (SIRF ROOM ASSIGN HOGA)
-            match_queue_key = f"match_queue_{category_slug}"
+            match_queue_key = f"match_queue_table_{table_id}"
             queue_data = cache.get(match_queue_key)
             
             if queue_data:
@@ -305,7 +305,8 @@ class GetGameContentAPIView(APIView):
             return Response({
                 "room_id": room_id,
                 "max_players": max_players,
-                "is_typing_test": 'typing' in category_slug.lower()
+                "is_typing_test": 'typing' in table.category.name.lower(),
+                "table_id": table.id
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
@@ -313,21 +314,22 @@ class GetGameContentAPIView(APIView):
             traceback.print_exc() 
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+# 🔴 FIX: SubmitGameResult ko Table ID par set kiya
 class SubmitGameResultAPIView(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     def post(self, request):
         try:
             user = request.user
-            table_slug = request.data.get('table_id')
+            table_id = request.data.get('table_id')
             score = int(request.data.get('score', 0))
             wpm = int(request.data.get('wpm', 0))
             status_result = request.data.get('status', 'LOSS')
 
-            table = GameTable.objects.filter(category__name__iexact=table_slug.replace('-', ' ')).first()
+            table = GameTable.objects.filter(id=table_id).first()
             if not table: return Response({"error": "Table not found"}, status=status.HTTP_404_NOT_FOUND)
 
-            is_typing = 'typing' in table_slug.lower()
+            is_typing = 'typing' in table.category.name.lower()
             if not is_typing:
                 max_points_per_q = 10 + table.time_per_question
                 max_possible_score = table.questions_count * max_points_per_q
@@ -370,12 +372,13 @@ class SubmitGameResultAPIView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+# 🔴 FIX: Leaderboard ko Table ID par set kiya
 class LeaderboardAPIView(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
-    def get(self, request, table_slug):
+    def get(self, request, table_id):
         try:
-            table = GameTable.objects.filter(category__name__iexact=table_slug.replace('-', ' ')).first()
+            table = GameTable.objects.filter(id=table_id).first()
             if not table: return Response({"error": "Table not found"}, status=status.HTTP_404_NOT_FOUND)
 
             history = MatchHistory.objects.filter(table=table).order_by('-score')

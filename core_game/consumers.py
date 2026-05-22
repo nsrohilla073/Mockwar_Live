@@ -8,11 +8,12 @@ from core_game.models import GameTable
 from django.conf import settings
 import google.generativeai as genai
 
-# 🧠 GEMINI BRAIN
+# 🧠 GEMINI BRAIN (ID Based)
 @database_sync_to_async
-def generate_ai_content(table_slug):
+def generate_ai_content(table_id):
+    table = None
     try:
-        print(f"🤖 Starting AI Generation for: {table_slug}")
+        print(f"🤖 Starting AI Generation for Table ID: {table_id}")
         
         api_key = getattr(settings, 'GEMINI_API_KEY', None)
         if not api_key:
@@ -20,13 +21,15 @@ def generate_ai_content(table_slug):
             
         genai.configure(api_key=api_key)
         
-        table = GameTable.objects.filter(category__name__iexact=table_slug.replace('-', ' ')).first()
+        # 🔴 NAYA: ID se table fetch kar rahe hain
+        table = GameTable.objects.filter(id=table_id).first()
         if not table:
             table = GameTable.objects.first()
             
         q_count = table.questions_count if table else 5
         q_time = table.time_per_question if table else 12
-        is_typing = 'typing' in table_slug.lower()
+        topic_name = table.category.name if table else "General Knowledge"
+        is_typing = 'typing' in topic_name.lower()
         
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
@@ -50,11 +53,10 @@ def generate_ai_content(table_slug):
             para = res.text.strip().replace('\n', ' ').replace('"', '').replace('`', '')
             return {"is_typing_test": True, "paragraph": para, "time_limit": 60}
         else:
-            clean_topic = table.category.name if table else table_slug.replace('-', ' ')
             random_seed = random.randint(100000, 999999)
             
             prompt = f"""
-            Generate exactly {q_count} multiple choice questions randomly on the topic: "{clean_topic}".
+            Generate exactly {q_count} multiple choice questions randomly on the topic: "{topic_name}".
             
             CRITICAL INSTRUCTION FOR RANDOMNESS: 
             - Pick these {q_count} questions from a MASSIVE pool of possibilities. 
@@ -85,6 +87,8 @@ def generate_ai_content(table_slug):
             
     except Exception as e:
         print(f"❌ AI CRITICAL ERROR: {str(e)}")
+        q_count = table.questions_count if table else 5
+        q_time = table.time_per_question if table else 12
         fallback_qs = [
             {"id":1, "question":"What is the capital of India? / भारत की राजधानी क्या है?", "options":["Mumbai / मुंबई", "New Delhi / नई दिल्ली", "Kolkata / कोलकाता", "Chennai / चेन्नई"], "answer":"B"},
             {"id":2, "question":"Which planet is known as the Red Planet? / लाल ग्रह किसे कहा जाता है?", "options":["Earth / पृथ्वी", "Venus / शुक्र", "Mars / मंगल", "Jupiter / बृहस्पति"], "answer":"C"},
@@ -94,11 +98,13 @@ def generate_ai_content(table_slug):
         ]
         return {"is_typing_test": False, "questions": fallback_qs[:q_count], "time_per_question": q_time}
 
+
 class GameConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        self.table_slug = self.scope['url_route']['kwargs']['table_slug']
+        # 🔴 NAYA: Slug ko hata kar Table ID kar diya
+        self.table_id = self.scope['url_route']['kwargs']['table_id']
         self.room_id = self.scope['url_route']['kwargs']['room_id']
-        self.room_group_name = f'arena_{self.table_slug}_{self.room_id}'
+        self.room_group_name = f'arena_table_{self.table_id}_{self.room_id}'
 
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()
@@ -119,10 +125,10 @@ class GameConsumer(AsyncWebsocketConsumer):
             return True
         return False
         
-    # 🔴 NAYA: Database se max_players nikalne ka function
+    # 🔴 NAYA: Database se ID se max_players nikalne ka function
     @database_sync_to_async
-    def get_table_max_players(self, slug):
-        table = GameTable.objects.filter(category__name__iexact=slug.replace('-', ' ')).first()
+    def get_table_max_players(self, t_id):
+        table = GameTable.objects.filter(id=t_id).first()
         return table.max_players if table else 2
 
     async def receive(self, text_data):
@@ -134,7 +140,8 @@ class GameConsumer(AsyncWebsocketConsumer):
             is_first = await self.check_and_lock_questions(lock_key)
             
             if is_first:
-                content = await generate_ai_content(self.table_slug)
+                # 🔴 NAYA: Table ID pass ki gayi hai
+                content = await generate_ai_content(self.table_id)
                 await self.channel_layer.group_send(
                     self.room_group_name, 
                     {'type': 'game_message', 'action': 'questions_ready', 'content': content}
@@ -148,14 +155,16 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def get_cache(self, key): return cache.get(key, {})
+    
     @database_sync_to_async
     def set_cache(self, key, value, timeout): cache.set(key, value, timeout)
+    
     @database_sync_to_async
     def delete_cache(self, key): cache.delete(key)
 
     async def process_game_finish(self, player_name, final_score, wpm):
-        # 🔴 NAYA: DB se check karo table kitne logo ki hai
-        table_max_players = await self.get_table_max_players(self.table_slug)
+        # 🔴 NAYA: DB se limit table_id se li jayegi
+        table_max_players = await self.get_table_max_players(self.table_id)
 
         cache_key = f"match_state_{self.room_group_name}"
         state = await self.get_cache(cache_key)
@@ -165,15 +174,13 @@ class GameConsumer(AsyncWebsocketConsumer):
         state['players'][player_name] = {'score': final_score, 'wpm': wpm}
         await self.set_cache(cache_key, state, 120)
 
-        # 🔴 NAYA: Ab hardcoded 2 nahi, asli max_players check hoga!
+        # Draw aur Winner ka logic
         if len(state['players']) >= table_max_players:
-            # Sabhi players ko unke score aur WPM ke hisaab se descending order me sort karo
             sorted_players = sorted(state['players'].items(), key=lambda x: (x[1]['score'], x[1]['wpm']), reverse=True)
 
             top_score = sorted_players[0][1]['score']
             top_wpm = sorted_players[0][1]['wpm']
 
-            # Rank 1 walo ko winners me dalo (Agar tie hua toh 2 winners warna 1)
             winners = [name for name, data in sorted_players if data['score'] == top_score and data['wpm'] == top_wpm]
             losers = [name for name, data in sorted_players if name not in winners]
 

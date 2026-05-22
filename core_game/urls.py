@@ -35,10 +35,12 @@ urlpatterns = [
     
     # 🎮 Game & Lobby URLs
     path('game/live-tables/', GetLiveTablesAPIView.as_view(), name='live_tables'),
-    path('game/content/<slug:category_slug>/', GetGameContentAPIView.as_view(), name='game_content'),
+    path('game/content/<int:table_id>/', GetGameContentAPIView.as_view()),
+    path('game/submit-result/', SubmitGameResultAPIView.as_view()),
+    path('game/leaderboard/<int:table_id>/', LeaderboardAPIView.as_view()),
+
     path('game/play/', PlayGameAPIView.as_view(), name='play_game'),
-    path('game/submit-result/', SubmitGameResultAPIView.as_view(), name='submit_result'),
-    path('game/leaderboard/<str:table_slug>/', LeaderboardAPIView.as_view(), name='leaderboard'),
+
 
     # 👤 User Profile & History URLs
     path('user/dashboard-history/', UserDashboardHistoryAPIView.as_view(), name='dashboard_history'),
