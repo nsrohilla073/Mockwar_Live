@@ -1,27 +1,20 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Platform, StatusBar as RNStatusBar } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Image, ActivityIndicator } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Smartphone, Mail, ShieldCheck, User, CalendarDays, Zap, Camera } from 'lucide-react-native';
 import axios from 'axios';
-import { auth } from './firebase';
-import { PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+
+// 🔥 NATIVE FIREBASE IMPORTS
+import auth from '@react-native-firebase/auth';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 const API_BASE = "https://mockwar-backend.onrender.com";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDPZs2ME5T8o3ZcWw56nsU2PcWLK7F8KB0",
-  authDomain: "growthpro-4a4b7.firebaseapp.com",
-  projectId: "growthpro-4a4b7",
-  storageBucket: "growthpro-4a4b7.firebasestorage.app",
-  messagingSenderId: "922632746056",
-  appId: "1:922632746056:web:4fc210d49d118748b0947d"
-};
-
 export default function Auth({ navigation }) {
-  const [loginMethod, setLoginMethod] = useState('phone');
+  const [loginMethod, setLoginMethod] = useState('phone'); 
   const [isNewUser, setIsNewUser] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -29,14 +22,20 @@ export default function Auth({ navigation }) {
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   
-  const recaptchaVerifier = useRef(null);
-  const [verificationId, setVerificationId] = useState(null);
+  // Naya Native OTP Confirmation state
+  const [confirm, setConfirm] = useState(null);
 
   const [regData, setRegData] = useState({ name: '', dob: '', state: '', district: '', uid: '', phone: '', email: '', live_photo: '', referred_by: '' });
 
   const [permission, requestPermission] = useCameraPermissions();
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const cameraRef = useRef(null);
+
+  useEffect(() => {
+    GoogleSignin.configure({
+      webClientId: '922632746056-liktmi41674s9i41jh0rokdeqiioemh9.apps.googleusercontent.com', 
+    });
+  }, []);
 
   const openCamera = async () => {
     if (!permission) return;
@@ -55,13 +54,34 @@ export default function Auth({ navigation }) {
     }
   };
 
+  // 🟢 NATIVE GOOGLE LOGIN
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    try {
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      const userInfo = await GoogleSignin.signIn();
+      const idToken = userInfo.data?.idToken || userInfo.idToken;
+
+      const googleCredential = auth.GoogleAuthProvider.credential(idToken);
+      const result = await auth().signInWithCredential(googleCredential);
+      
+      const firebaseIdToken = await result.user.getIdToken();
+      await verifyTokenWithDjango(firebaseIdToken);
+    } catch (error) {
+      console.log("Google Error:", error);
+      Alert.alert("Google Login Failed", "Please check your configuration.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 📱 NATIVE PHONE OTP (No Captcha)
   const sendOTP = async () => {
     if (phone.length !== 10) return Alert.alert("Error", "Enter valid 10-digit number");
     setLoading(true);
     try {
-      const phoneProvider = new PhoneAuthProvider(auth);
-      const verifyId = await phoneProvider.verifyPhoneNumber("+91" + phone, recaptchaVerifier.current);
-      setVerificationId(verifyId);
+      const confirmation = await auth().signInWithPhoneNumber('+91' + phone);
+      setConfirm(confirmation);
       setOtpSent(true);
     } catch (error) {
       Alert.alert("OTP Error", error.message);
@@ -74,8 +94,7 @@ export default function Auth({ navigation }) {
     if (otp.length !== 6) return Alert.alert("Error", "Enter 6-digit OTP");
     setLoading(true);
     try {
-      const credential = PhoneAuthProvider.credential(verificationId, otp);
-      const result = await signInWithCredential(auth, credential);
+      const result = await confirm.confirm(otp);
       const token = await result.user.getIdToken();
       await verifyTokenWithDjango(token);
     } catch (error) {
@@ -89,8 +108,7 @@ export default function Auth({ navigation }) {
       const response = await axios.post(`${API_BASE}/api/auth/firebase-login/`, { id_token: idToken });
       if (response.data.is_new_user) {
         setIsNewUser(true);
-        setRegData({ ...regData, uid: response.data.uid, phone: response.data.phone || phone });
-        setLoading(false);
+        setRegData({ ...regData, uid: response.data.uid, phone: response.data.phone || phone, email: response.data.email || '' });
       } else {
         await AsyncStorage.setItem('access_token', response.data.access);
         await AsyncStorage.setItem('refresh_token', response.data.refresh);
@@ -99,12 +117,15 @@ export default function Auth({ navigation }) {
       }
     } catch (error) {
       Alert.alert("Login Failed", "Could not verify with server.");
+    } finally {
       setLoading(false);
     }
   };
 
   const handleRegistrationSubmit = async () => {
     if (!regData.live_photo) return Alert.alert("Hold On!", "Please capture KYC Live Photo.");
+    if (loginMethod === 'google' && !regData.phone) return Alert.alert("Hold On!", "Phone number is mandatory.");
+    
     setLoading(true);
     try {
       const response = await axios.post(`${API_BASE}/api/auth/complete-registration/`, regData);
@@ -121,7 +142,6 @@ export default function Auth({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <FirebaseRecaptchaVerifierModal ref={recaptchaVerifier} firebaseConfig={firebaseConfig} />
       <View style={styles.glowTop} />
       <View style={styles.glowBottom} />
 
@@ -135,7 +155,17 @@ export default function Auth({ navigation }) {
           {isNewUser ? (
             <View style={styles.formContainer}>
               <View style={styles.kycBanner}><ShieldCheck size={20} color="#34d399" /><Text style={styles.kycText}> VERIFIED. SETUP PROFILE.</Text></View>
+              
               <View style={styles.inputWrapper}><User size={20} color="#64748b" style={styles.icon} /><TextInput style={styles.input} placeholder="Full Name" placeholderTextColor="#64748b" onChangeText={(val) => setRegData({...regData, name: val})} /></View>
+              
+              {loginMethod === 'google' && (
+                <View style={styles.inputWrapper}><Smartphone size={20} color="#64748b" style={styles.icon} /><TextInput style={styles.input} placeholder="Mobile Number" placeholderTextColor="#64748b" keyboardType="numeric" maxLength={10} onChangeText={(val) => setRegData({...regData, phone: val})} /></View>
+              )}
+
+              {loginMethod === 'phone' && (
+                <View style={styles.inputWrapper}><Mail size={20} color="#64748b" style={styles.icon} /><TextInput style={styles.input} placeholder="Email Address" placeholderTextColor="#64748b" keyboardType="email-address" onChangeText={(val) => setRegData({...regData, email: val})} /></View>
+              )}
+
               <View style={styles.inputWrapper}><CalendarDays size={20} color="#64748b" style={styles.icon} /><TextInput style={styles.input} placeholder="DOB (YYYY-MM-DD)" placeholderTextColor="#64748b" onChangeText={(val) => setRegData({...regData, dob: val})} /></View>
             
               <View style={{ flexDirection: 'row', gap: 10, marginBottom: 15 }}>
@@ -166,32 +196,47 @@ export default function Auth({ navigation }) {
           ) : (
             <View style={styles.formContainer}>
               <View style={styles.tabContainer}>
-                <TouchableOpacity style={[styles.tab, styles.activeTab]}><Smartphone size={14} color="#fff" /><Text style={[styles.tabText, styles.activeTabText]}> SMS OTP</Text></TouchableOpacity>
-                <TouchableOpacity style={styles.tab} onPress={() => Alert.alert("Wait", "Use Phone Login for now.")}><Mail size={14} color="#64748b" /><Text style={styles.tabText}> G-MAIL</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => setLoginMethod('phone')} style={[styles.tab, loginMethod === 'phone' && styles.activeTab]}>
+                  <Smartphone size={14} color={loginMethod === 'phone' ? '#fff' : '#64748b'} />
+                  <Text style={[styles.tabText, loginMethod === 'phone' && styles.activeTabText]}> SMS OTP</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setLoginMethod('google')} style={[styles.tab, loginMethod === 'google' && styles.activeTab]}>
+                  <Mail size={14} color={loginMethod === 'google' ? '#fff' : '#64748b'} />
+                  <Text style={[styles.tabText, loginMethod === 'google' && styles.activeTabText]}> G-MAIL</Text>
+                </TouchableOpacity>
               </View>
 
               <View style={{ marginTop: 20 }}>
-                {!otpSent ? (
-                  <>
-                    <View style={{ flexDirection: 'row', gap: 10 }}>
-                      <View style={styles.prefixBox}><Text style={styles.prefixText}>+91</Text></View>
-                      <TextInput style={[styles.input, { flex: 1, backgroundColor: '#0f172a', paddingHorizontal: 15, borderRadius: 12 }]} placeholder="Mobile Number" placeholderTextColor="#64748b" keyboardType="numeric" maxLength={10} value={phone} onChangeText={setPhone} />
-                    </View>
-                    <TouchableOpacity activeOpacity={0.8} onPress={sendOTP} disabled={loading} style={{ marginTop: 20 }}>
-                      <LinearGradient colors={['#2563eb', '#4f46e5']} style={styles.submitBtn}>{loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>SECURE OTP LOGIN</Text>}</LinearGradient>
-                    </TouchableOpacity>
-                  </>
+                {loginMethod === 'phone' ? (
+                  !otpSent ? (
+                    <>
+                      <View style={{ flexDirection: 'row', gap: 10 }}>
+                        <View style={styles.prefixBox}><Text style={styles.prefixText}>+91</Text></View>
+                        <TextInput style={[styles.input, { flex: 1, backgroundColor: '#0f172a', paddingHorizontal: 15, borderRadius: 12 }]} placeholder="Mobile Number" placeholderTextColor="#64748b" keyboardType="numeric" maxLength={10} value={phone} onChangeText={setPhone} />
+                      </View>
+                      <TouchableOpacity activeOpacity={0.8} onPress={sendOTP} disabled={loading} style={{ marginTop: 20 }}>
+                        <LinearGradient colors={['#2563eb', '#4f46e5']} style={styles.submitBtn}>{loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>SECURE OTP LOGIN</Text>}</LinearGradient>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+                        <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold' }}>Sent to +91 {phone}</Text>
+                        <TouchableOpacity onPress={() => setOtpSent(false)}><Text style={{ color: '#60a5fa', fontSize: 12, fontWeight: 'bold' }}>EDIT</Text></TouchableOpacity>
+                      </View>
+                      <TextInput style={styles.otpInput} placeholder="------" placeholderTextColor="#334155" keyboardType="numeric" maxLength={6} value={otp} onChangeText={setOtp} secureTextEntry />
+                      <TouchableOpacity activeOpacity={0.8} onPress={verifyOTP} disabled={loading} style={{ marginTop: 20 }}>
+                        <LinearGradient colors={['#10b981', '#059669']} style={styles.submitBtn}>{loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>CONFIRM & ENTER</Text>}</LinearGradient>
+                      </TouchableOpacity>
+                    </>
+                  )
                 ) : (
-                  <>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
-                      <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold' }}>Sent to +91 {phone}</Text>
-                      <TouchableOpacity onPress={() => setOtpSent(false)}><Text style={{ color: '#60a5fa', fontSize: 12, fontWeight: 'bold' }}>EDIT</Text></TouchableOpacity>
+                  <TouchableOpacity activeOpacity={0.8} onPress={handleGoogleLogin} disabled={loading} style={{ marginTop: 10 }}>
+                    <View style={styles.googleBtn}>
+                      <Image source={{ uri: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png' }} style={{width: 20, height: 20, marginRight: 10}} />
+                      {loading ? <ActivityIndicator color="#0f172a" /> : <Text style={styles.googleBtnText}>AUTHORIZE WITH GOOGLE</Text>}
                     </View>
-                    <TextInput style={styles.otpInput} placeholder="------" placeholderTextColor="#334155" keyboardType="numeric" maxLength={6} value={otp} onChangeText={setOtp} secureTextEntry />
-                    <TouchableOpacity activeOpacity={0.8} onPress={verifyOTP} disabled={loading} style={{ marginTop: 20 }}>
-                      <LinearGradient colors={['#10b981', '#059669']} style={styles.submitBtn}>{loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>CONFIRM & ENTER</Text>}</LinearGradient>
-                    </TouchableOpacity>
-                  </>
+                  </TouchableOpacity>
                 )}
               </View>
             </View>
@@ -204,7 +249,7 @@ export default function Auth({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
+  container: { flex: 1, backgroundColor: '#020617', paddingTop: Platform.OS === 'android' ? RNStatusBar.currentHeight : 0 },
   scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 20 },
   glowTop: { position: 'absolute', top: 50, left: -50, width: 200, height: 200, backgroundColor: 'rgba(37, 99, 235, 0.15)', borderRadius: 100 },
   glowBottom: { position: 'absolute', bottom: 50, right: -50, width: 200, height: 200, backgroundColor: 'rgba(79, 70, 229, 0.15)', borderRadius: 100 },
@@ -225,6 +270,8 @@ const styles = StyleSheet.create({
   otpInput: { backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#1e293b', borderRadius: 12, color: '#fff', fontSize: 32, fontWeight: '900', textAlign: 'center', letterSpacing: 10, paddingVertical: 15 },
   submitBtn: { paddingVertical: 18, borderRadius: 16, alignItems: 'center', justifyContent: 'center', shadowColor: '#3b82f6', shadowOpacity: 0.4, shadowRadius: 10 },
   btnText: { color: '#fff', fontSize: 14, fontWeight: '900', letterSpacing: 1 },
+  googleBtn: { backgroundColor: '#fff', flexDirection: 'row', paddingVertical: 18, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  googleBtnText: { color: '#0f172a', fontSize: 14, fontWeight: '900', letterSpacing: 1 },
   kycBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.3)', padding: 12, borderRadius: 12, marginBottom: 20 },
   kycText: { color: '#34d399', fontSize: 11, fontWeight: 'bold', letterSpacing: 1 },
   inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#1e293b', borderRadius: 12, paddingHorizontal: 15, height: 55, marginBottom: 15 },

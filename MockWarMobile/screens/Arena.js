@@ -1,20 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView, TextInput, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView, TextInput, Alert, BackHandler, AppState } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Clock, Trophy, User, Swords, Users, Zap, Crosshair } from 'lucide-react-native';
+import { Platform, StatusBar as RNStatusBar } from 'react-native';
+import { Clock, Trophy, User, Swords, Users, Zap, Crosshair, Volume2, VolumeX } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import { Audio } from 'expo-av';
 
 const API_BASE = "https://mockwar-backend.onrender.com";
 const WS_BASE = "wss://mockwar-backend.onrender.com";
 
 export default function Arena({ route, navigation }) {
-  const { tableId } = route.params; // Lobby se bheja gaya Table ID
+  const { tableId } = route.params; 
   
   const hasSubmitted = useRef(false); 
   const apiCalled = useRef(false);
 
-  // States
   const [maxPlayers, setMaxPlayers] = useState(2); 
   const maxPlayersRef = useRef(2); 
   const [gameState, setGameState] = useState("searching"); 
@@ -27,7 +28,9 @@ export default function Arena({ route, navigation }) {
   const [timePerQ, setTimePerQ] = useState(12); 
   const [apiLoading, setApiLoading] = useState(false);
 
-  // Scoreboard & WebSocket
+  // 🎵 Audio State
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
   const [myPoints, setMyPoints] = useState(0);
   const myPointsRef = useRef(0);
   const myGamerTagRef = useRef("Live_Player"); 
@@ -63,13 +66,56 @@ export default function Arena({ route, navigation }) {
   useEffect(() => { wpmRef.current = wpm; }, [wpm]);
   useEffect(() => { accuracyRef.current = accuracy; }, [accuracy]);
 
+  // 🎵 Native Audio Playback Helper
+  const playSound = async (soundFileName) => {
+    if (!soundEnabled) return;
+    try {
+      let soundAsset;
+      switch (soundFileName) {
+        case 'match-found.mp3': soundAsset = require('./assets/sounds/match-found.mp3'); break;
+        case 'tick.mp3': soundAsset = require('./assets/sounds/tick.mp3'); break;
+        case 'correct.mp3': soundAsset = require('./assets/sounds/correct.mp3'); break;
+        case 'wrong.mp3': soundAsset = require('./assets/sounds/wrong.mp3'); break;
+        case 'win.mp3': soundAsset = require('./assets/sounds/win.mp3'); break;
+        case 'lose.mp3': soundAsset = require('./assets/sounds/lose.mp3'); break;
+      }
+      
+      if (soundAsset) {
+        const { sound } = await Audio.Sound.createAsync(soundAsset);
+        await sound.playAsync();
+        sound.setOnPlaybackStatusUpdate((status) => {
+          if (status.didJustFinish) sound.unloadAsync(); // Memory management
+        });
+      }
+    } catch (error) {
+      console.log("Audio Error: Make sure assets/sounds folder exists!", error);
+    }
+  };
+
+  // 🚀 ANTI-CHEAT
+  useEffect(() => {
+    const backAction = () => {
+      if (gameStateRef.current === 'playing' || gameStateRef.current === 'searching' || gameStateRef.current === 'found') {
+        Alert.alert("🚨 Match in Progress!", "If you leave now, you will lose your entry fee. Are you sure?", [
+          { text: "Resume Game", onPress: () => null, style: "cancel" },
+          { text: "Surrender", onPress: () => navigation.navigate('Lobby'), style: "destructive" }
+        ]);
+        return true; 
+      }
+      return false;
+    };
+    const backHandler = BackHandler.addEventListener("hardwareBackPress", backAction);
+    const appStateSubscription = AppState.addEventListener('change', nextAppState => {
+      if ((nextAppState === 'background' || nextAppState === 'inactive') && gameStateRef.current === 'playing') {
+        console.log("App Minimized during Live Match!");
+      }
+    });
+    return () => { backHandler.remove(); appStateSubscription.remove(); };
+  }, [navigation]);
+
   const sendMyScore = (newScore) => {
       if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-          ws.current.send(JSON.stringify({
-              action: 'score_update',
-              score: newScore,
-              player_name: myGamerTagRef.current
-          }));
+          ws.current.send(JSON.stringify({ action: 'score_update', score: newScore, player_name: myGamerTagRef.current }));
       }
   };
 
@@ -79,27 +125,17 @@ export default function Arena({ route, navigation }) {
       try {
         const token = await AsyncStorage.getItem('access_token');
         if (!token) { navigation.navigate("Auth"); return; }
-
         const profRes = await axios.get(`${API_BASE}/api/user/profile/`, { headers: { Authorization: `Bearer ${token}` } });
         myGamerTagRef.current = profRes.data.gamer_tag;
 
-        const res = await axios.get(`${API_BASE}/api/game/content/${tableId}/`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        
-        const tableLimit = res.data.max_players || 2;
-        setMaxPlayers(tableLimit);
-        maxPlayersRef.current = tableLimit;
+        const res = await axios.get(`${API_BASE}/api/game/content/${tableId}/`, { headers: { Authorization: `Bearer ${token}` } });
+        setMaxPlayers(res.data.max_players || 2);
+        maxPlayersRef.current = res.data.max_players || 2;
         setIsTypingMode(res.data.is_typing_test);
 
         const matchRoomId = res.data.room_id || `room_${Date.now()}`;
-        
-        // Connect to WebSocket
         ws.current = new WebSocket(`${WS_BASE}/ws/arena/${tableId}/${matchRoomId}/`);
-        
-        ws.current.onopen = () => {
-            sendMyScore(0); 
-        };
+        ws.current.onopen = () => { sendMyScore(0); };
 
         ws.current.onmessage = (event) => {
             const data = JSON.parse(event.data);
@@ -116,7 +152,6 @@ export default function Arena({ route, navigation }) {
                     setTimePerQ(data.content.time_per_question);
                     setTimeLeft(data.content.time_per_question);
                 }
-                
                 setTimeout(() => {
                     setGameState("playing");
                     typingStartTime.current = Date.now();
@@ -144,22 +179,14 @@ export default function Arena({ route, navigation }) {
                 }
             }
 
-            if (data.action === 'waiting_for_opponent') {
-                setGameState("waiting_result");
-            }
-
-            if (data.action === 'match_result') {
-                handleMatchResult(data);
-            }
+            if (data.action === 'waiting_for_opponent') setGameState("waiting_result");
+            if (data.action === 'match_result') handleMatchResult(data);
         };
-
       } catch (error) {
-        console.error("Init Error:", error);
         Alert.alert("Error", "Could not connect to Arena.");
         navigation.navigate("Lobby");
       }
     };
-    
     initGame();
     return () => { if (ws.current) ws.current.close(); };
   }, []);
@@ -169,11 +196,7 @@ export default function Arena({ route, navigation }) {
     if (gameState !== "searching") return;
     searchIntervalRef.current = setInterval(() => {
         setSearchTime(prev => {
-            if (prev <= 1) {
-                clearInterval(searchIntervalRef.current);
-                fillWithBotsAndStart();
-                return 0;
-            }
+            if (prev <= 1) { clearInterval(searchIntervalRef.current); fillWithBotsAndStart(); return 0; }
             return prev - 1;
         });
     }, 1000);
@@ -182,8 +205,7 @@ export default function Arena({ route, navigation }) {
 
   useEffect(() => {
       if (gameState === "searching" && opponents.length === maxPlayers - 1 && maxPlayers > 1) {
-          clearInterval(searchIntervalRef.current);
-          triggerMatchFound();
+          clearInterval(searchIntervalRef.current); triggerMatchFound();
       }
   }, [opponents.length, gameState, maxPlayers]);
 
@@ -204,6 +226,7 @@ export default function Arena({ route, navigation }) {
           ws.current.send(JSON.stringify({ action: 'request_questions' }));
       }
       setGameState("found");
+      playSound('match-found.mp3'); // 🎵 Play Sound
   };
 
   // 🚀 3. GAMEPLAY TIMER
@@ -212,6 +235,8 @@ export default function Arena({ route, navigation }) {
     if (timeLeft > 0) {
       const timer = setTimeout(() => {
         setTimeLeft(timeLeft - 1);
+        
+        if (timeLeft <= 5 && timeLeft > 0) playSound('tick.mp3'); // 🎵 Play Tick Sound
         
         updateOpponents(prev => prev.map(opp => {
              if (opp.isBot) {
@@ -237,12 +262,16 @@ export default function Arena({ route, navigation }) {
     const selectedLetter = ["A", "B", "C", "D"][selectedIndex];
 
     const isCorrect = selectedLetter === dbAnswer;
-    const earnedPoints = isCorrect ? (10 + timeLeft) : 0; 
     
+    // 🎵 Play SFX based on correctness
+    if (isCorrect) playSound('correct.mp3');
+    else playSound('wrong.mp3');
+
+    const earnedPoints = isCorrect ? (10 + timeLeft) : 0; 
     const updatedMyPoints = myPoints + earnedPoints;
     setMyPoints(updatedMyPoints);
     sendMyScore(updatedMyPoints); 
-    handleNextQuestion(updatedMyPoints, selectedOption);
+    handleNextQuestion(updatedMyPoints);
   };
 
   const handleNextQuestion = (finalMyPoints) => {
@@ -275,9 +304,7 @@ export default function Arena({ route, navigation }) {
     setMyPoints(currentPoints);
     sendMyScore(currentPoints); 
 
-    if (cleanTyped === cleanTarget && cleanTarget.length > 0) {
-      triggerRefereeSubmit(currentPoints);
-    }
+    if (cleanTyped === cleanTarget && cleanTarget.length > 0) triggerRefereeSubmit(currentPoints);
   };
 
   // 🚀 4. SUBMIT TO REFEREE
@@ -289,9 +316,7 @@ export default function Arena({ route, navigation }) {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
         ws.current.send(JSON.stringify({ action: 'game_finished', player_name: myGamerTagRef.current, score: finalMyPts, wpm: wpmRef.current }));
         opponentsRef.current.forEach(opp => {
-            if (opp.isBot) {
-                ws.current.send(JSON.stringify({ action: 'game_finished', player_name: opp.name, score: opp.score, wpm: 0 }));
-            }
+            if (opp.isBot) ws.current.send(JSON.stringify({ action: 'game_finished', player_name: opp.name, score: opp.score, wpm: 0 }));
         });
     }
   };
@@ -307,7 +332,12 @@ export default function Arena({ route, navigation }) {
       let cStatus = 'LOSS';
       if (data.is_draw) cStatus = 'DRAW';
       else if (data.winners.includes(myTag)) cStatus = 'WIN';
+      
       setMatchStatus(cStatus);
+
+      // 🎵 Win or Lose Sound
+      if (cStatus === 'WIN') playSound('win.mp3');
+      else playSound('lose.mp3'); 
 
       const finalStandings = Object.entries(data.final_scores).map(([name, stats]) => ({
           name, score: stats.score, isMe: name === myTag
@@ -325,7 +355,6 @@ export default function Arena({ route, navigation }) {
           const res = await axios.post(`${API_BASE}/api/game/submit-result/`, { 
               table_id: tableId, score: data.final_scores[myTag].score, wpm: data.final_scores[myTag].wpm, accuracy: accuracyRef.current, status: cStatus
           }, { headers: { Authorization: `Bearer ${token}` } });
-
           setMatchReward(res.data.prize_won || 0); 
       } catch (error) {
           console.error("Submission Error:", error);
@@ -336,10 +365,14 @@ export default function Arena({ route, navigation }) {
 
   return (
     <View style={styles.container}>
+      {/* 🔊 Mute/Unmute Button */}
+      <TouchableOpacity onPress={() => setSoundEnabled(!soundEnabled)} style={styles.soundBtn}>
+        {soundEnabled ? <Volume2 size={20} color="#94a3b8" /> : <VolumeX size={20} color="#ef4444" />}
+      </TouchableOpacity>
+
       <View style={styles.glowTop} />
       <View style={styles.glowBottom} />
 
-      {/* 🔍 SEARCHING */}
       {gameState === 'searching' && (
         <View style={styles.centerContent}>
           <Text style={styles.arenaTitle}>SECURING ARENA</Text>
@@ -372,7 +405,6 @@ export default function Arena({ route, navigation }) {
         </View>
       )}
 
-      {/* ⚔️ MATCH FOUND */}
       {gameState === 'found' && (
         <View style={styles.centerContent}>
           <View style={styles.matchFoundIcon}><Swords size={60} color="#34d399" /></View>
@@ -382,7 +414,6 @@ export default function Arena({ route, navigation }) {
         </View>
       )}
 
-      {/* 🎮 PLAYING */}
       {gameState === 'playing' && (
         <View style={styles.gameContainer}>
           <View style={styles.scoreBoard}>
@@ -431,6 +462,11 @@ export default function Arena({ route, navigation }) {
                   style={styles.typingInput}
                   multiline
                   autoFocus
+                  autoCorrect={false}
+                  spellCheck={false}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  keyboardType="visible-password"
                   placeholder="Start typing here..."
                   placeholderTextColor="#475569"
                   value={typedText}
@@ -442,7 +478,6 @@ export default function Arena({ route, navigation }) {
         </View>
       )}
 
-      {/* ⏳ WAITING RESULT */}
       {gameState === 'waiting_result' && (
         <View style={styles.centerContent}>
           <ActivityIndicator size="large" color="#3b82f6" />
@@ -451,7 +486,6 @@ export default function Arena({ route, navigation }) {
         </View>
       )}
 
-      {/* 🏆 FINISHED */}
       {gameState === 'finished' && (
         <View style={styles.centerContent}>
           <View style={styles.resultCard}>
@@ -479,7 +513,6 @@ export default function Arena({ route, navigation }) {
                 ))
               )}
             </View>
-
             <TouchableOpacity style={styles.returnBtn} onPress={() => navigation.navigate('Lobby')} disabled={apiLoading}>
               <Text style={styles.returnBtnText}>{apiLoading ? "SAVING..." : "RETURN TO LOBBY"}</Text>
             </TouchableOpacity>
@@ -490,9 +523,9 @@ export default function Arena({ route, navigation }) {
   );
 }
 
-// 🎨 STYLESHEET
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#020617', padding: 15 },
+  soundBtn: { position: 'absolute', top: 50, right: 20, zIndex: 100, backgroundColor: 'rgba(15,23,42,0.8)', padding: 10, borderRadius: 50, borderWidth: 1, borderColor: '#1e293b' },
   glowTop: { position: 'absolute', top: -50, left: -50, width: 250, height: 250, backgroundColor: 'rgba(37, 99, 235, 0.15)', borderRadius: 125 },
   glowBottom: { position: 'absolute', bottom: -50, right: -50, width: 250, height: 250, backgroundColor: 'rgba(79, 70, 229, 0.15)', borderRadius: 125 },
   centerContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -503,8 +536,6 @@ const styles = StyleSheet.create({
   card: { backgroundColor: 'rgba(15, 23, 42, 0.8)', padding: 20, borderRadius: 24, borderWidth: 1, borderColor: '#1e293b', width: '100%' },
   cardHeader: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#1e293b', paddingBottom: 15, marginBottom: 15 },
   cardHeaderText: { color: '#94a3b8', fontSize: 12, fontWeight: '900', letterSpacing: 1 },
-  countBadge: { backgroundColor: 'rgba(59,130,246,0.1)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(59,130,246,0.3)' },
-  countText: { color: '#60a5fa', fontSize: 10, fontWeight: '900' },
   playerRowMe: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: 'rgba(59,130,246,0.1)', padding: 15, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(59,130,246,0.3)', marginBottom: 10 },
   playerRowOpp: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: 'rgba(15,23,42,0.8)', padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#1e293b', marginBottom: 10 },
   playerNameMe: { color: '#60a5fa', fontWeight: '900', fontSize: 14 },

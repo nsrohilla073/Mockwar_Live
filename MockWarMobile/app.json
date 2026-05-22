@@ -1,45 +1,57 @@
 {
   "expo": {
-    "name": "MockWarMobile",
-    "slug": "MockWarMobile",
+    "name": "MockWar",
+    "slug": "mockwar",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "mockwarmobile",
-    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#020617"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
-      "icon": "./assets/expo.icon"
+      "supportsTablet": false,
+      "bundleIdentifier": "com.mockwar.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "MockWar needs camera access to capture your live photo for KYC verification.",
+        "NSMicrophoneUsageDescription": "MockWar needs microphone access for live gameplay features.",
+        "UIBackgroundModes": [
+          "fetch"
+        ]
+      }
     },
     "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      },
-      "predictiveBackGestureEnabled": false
-    },
-    "web": {
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "package": "com.mockwar.app",
+      "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.VIBRATE",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "plugins": [
-      "expo-router",
+      "expo-camera",
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth",
       [
-        "expo-splash-screen",
+        "expo-av",
         {
-          "backgroundColor": "#208AEF",
-          "android": {
-            "image": "./assets/images/splash-icon.png",
-            "imageWidth": 76
-          }
+          "microphonePermission": "MockWar needs microphone access for live gameplay features."
         }
-      ],
-      "expo-web-browser"
+      ]
     ],
-    "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": false
+    "extra": {
+      "eas": {
+        "projectId": "fecb3d23-00f0-4f0a-bf95-201862a4eb9d"
+      }
     }
   }
 }
