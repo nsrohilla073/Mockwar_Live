@@ -4,30 +4,36 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Image, ActivityIndicator } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Smartphone, Mail, ShieldCheck, User, CalendarDays, Zap, Camera, Gift } from 'lucide-react-native';
+import { Smartphone, Mail, ShieldCheck, User, CalendarDays, Zap, Camera, Gift, CheckSquare, Square } from 'lucide-react-native'; // 🔴 NAYA: CheckSquare
 import axios from 'axios';
-import { Picker } from '@react-native-picker/picker'; // 🔴 NAYA: State/District Dropdown ke liye
+import { Picker } from '@react-native-picker/picker'; 
 
-// 🔥 NATIVE FIREBASE IMPORTS
 import auth from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 const API_BASE = "https://mockwar-backend.onrender.com";
 
-// 🔴 NAYA: INDIA STATES LIST (Web wali list copy ki)
+// 🔴 NAYA: Legal Banned States List
+const BANNED_STATES = ["Andhra Pradesh", "Assam", "Nagaland", "Odisha", "Sikkim", "Telangana"];
+
 const INDIA_STATES = {
-  "Andhra Pradesh": ["Anantapur", "Chittoor", "Visakhapatnam", "Vijayawada", "Guntur", "Nellore", "Tirupati"],
-  "Bihar": ["Patna", "Gaya", "Bhagalpur", "Muzaffarpur", "Purnia", "Darbhanga", "Arrah", "Begusarai"],
-  "Delhi": ["Central Delhi", "New Delhi", "North Delhi", "South Delhi", "West Delhi", "East Delhi"],
-  "Gujarat": ["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Bhavnagar", "Jamnagar", "Gandhinagar"],
-  "Haryana": ["Gurugram", "Faridabad", "Panipat", "Ambala", "Rohtak", "Hisar", "Karnal", "Sonipat"],
-  "Karnataka": ["Bengaluru", "Mysuru", "Hubli", "Mangaluru", "Belagavi", "Davangere", "Ballari"],
-  "Maharashtra": ["Mumbai", "Pune", "Nagpur", "Thane", "Nashik", "Aurangabad", "Solapur"],
-  "Punjab": ["Ludhiana", "Amritsar", "Jalandhar", "Patiala", "Bathinda", "Mohali", "Pathankot"],
-  "Rajasthan": ["Jaipur", "Jodhpur", "Kota", "Bikaner", "Ajmer", "Udaipur", "Bhilwara", "Alwar"],
-  "Uttar Pradesh": ["Lucknow", "Kanpur", "Ghaziabad", "Agra", "Varanasi", "Meerut", "Prayagraj", "Noida"],
-  "West Bengal": ["Kolkata", "Howrah", "Durgapur", "Asansol", "Siliguri", "Darjeeling", "Kharagpur"]
-}; // Aap yahan poori list daal sakte hain
+  "Andhra Pradesh": ["Anantapur", "Chittoor", "Visakhapatnam"], // Restricted
+  "Assam": ["Guwahati", "Dibrugarh"], // Restricted
+  "Bihar": ["Patna", "Gaya", "Bhagalpur"],
+  "Delhi": ["Central Delhi", "New Delhi"],
+  "Gujarat": ["Ahmedabad", "Surat", "Vadodara"],
+  "Haryana": ["Gurugram", "Faridabad", "Panipat"],
+  "Karnataka": ["Bengaluru", "Mysuru"],
+  "Maharashtra": ["Mumbai", "Pune", "Nagpur"],
+  "Nagaland": ["Dimapur", "Kohima"], // Restricted
+  "Odisha": ["Bhubaneswar", "Cuttack"], // Restricted
+  "Punjab": ["Ludhiana", "Amritsar"],
+  "Rajasthan": ["Jaipur", "Jodhpur"],
+  "Sikkim": ["Gangtok"], // Restricted
+  "Telangana": ["Hyderabad", "Warangal"], // Restricted
+  "Uttar Pradesh": ["Lucknow", "Kanpur", "Noida"],
+  "West Bengal": ["Kolkata", "Howrah"]
+};
 
 export default function Auth({ navigation }) {
   const [loginMethod, setLoginMethod] = useState('phone'); 
@@ -38,9 +44,11 @@ export default function Auth({ navigation }) {
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   
+  // 🔴 NAYA: OTP Timer State & 18+ Check
+  const [timer, setTimer] = useState(0);
+  const [isAgeVerified, setIsAgeVerified] = useState(false);
+  
   const [confirm, setConfirm] = useState(null);
-
-  // 🔴 NAYA: referred_by add kiya regData me
   const [regData, setRegData] = useState({ name: '', dob: '', state: '', district: '', uid: '', phone: '', email: '', live_photo: '', referred_by: '' });
 
   const [permission, requestPermission] = useCameraPermissions();
@@ -48,21 +56,28 @@ export default function Auth({ navigation }) {
   const cameraRef = useRef(null);
 
   useEffect(() => {
-    GoogleSignin.configure({
-      webClientId: '922632746056-liktmi41674s9i41jh0rokdeqiioemh9.apps.googleusercontent.com', 
-    });
+    GoogleSignin.configure({ webClientId: '922632746056-liktmi41674s9i41jh0rokdeqiioemh9.apps.googleusercontent.com' });
   }, []);
 
-  const openCamera = async () => {
+  // 🔴 NAYA: OTP Timer Logic
+  useEffect(() => {
+    let interval;
+    if (timer > 0) {
+      interval = setInterval(() => setTimer(prev => prev - 1), 1000);
+    }
+    return () => clearInterval(interval);
+  }, [timer]);
+
+  const openCamera = async () => { /* Same as before */
     if (!permission) return;
     if (!permission.granted) {
       const { granted } = await requestPermission();
-      if (!granted) { Alert.alert("Permission Denied", "Camera access is required for KYC."); return; }
+      if (!granted) { Alert.alert("Permission Denied", "Camera required."); return; }
     }
     setIsCameraOpen(true);
   };
 
-  const capturePhoto = async () => {
+  const capturePhoto = async () => { /* Same as before */
     if (cameraRef.current) {
       const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.5 });
       setRegData({ ...regData, live_photo: `data:image/jpeg;base64,${photo.base64}` });
@@ -70,54 +85,45 @@ export default function Auth({ navigation }) {
     }
   };
 
-  const handleGoogleLogin = async () => {
+  const handleGoogleLogin = async () => { /* Same as before */
     setLoading(true);
     try {
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       const userInfo = await GoogleSignin.signIn();
       const idToken = userInfo.data?.idToken || userInfo.idToken;
-
       const googleCredential = auth.GoogleAuthProvider.credential(idToken);
       const result = await auth().signInWithCredential(googleCredential);
-      
       const firebaseIdToken = await result.user.getIdToken();
       await verifyTokenWithDjango(firebaseIdToken);
-    } catch (error) {
-      console.log("Google Error:", error);
-      Alert.alert("Google Login Failed", "Please check your configuration.");
-    } finally {
-      setLoading(false);
-    }
+    } catch (error) { Alert.alert("Google Login Failed", "Check config."); } 
+    finally { setLoading(false); }
   };
 
   const sendOTP = async () => {
     if (phone.length !== 10) return Alert.alert("Error", "Enter valid 10-digit number");
+    if (timer > 0) return; // Wait for timer
+
     setLoading(true);
     try {
       const confirmation = await auth().signInWithPhoneNumber('+91' + phone);
       setConfirm(confirmation);
       setOtpSent(true);
-    } catch (error) {
-      Alert.alert("OTP Error", error.message);
-    } finally {
-      setLoading(false);
-    }
+      setTimer(60); // 🔴 Start 60s cooldown
+    } catch (error) { Alert.alert("OTP Error", error.message); } 
+    finally { setLoading(false); }
   };
 
-  const verifyOTP = async () => {
+  const verifyOTP = async () => { /* Same as before */
     if (otp.length !== 6) return Alert.alert("Error", "Enter 6-digit OTP");
     setLoading(true);
     try {
       const result = await confirm.confirm(otp);
       const token = await result.user.getIdToken();
       await verifyTokenWithDjango(token);
-    } catch (error) {
-      Alert.alert("Error", "Incorrect OTP!");
-      setLoading(false);
-    }
+    } catch (error) { Alert.alert("Error", "Incorrect OTP!"); setLoading(false); }
   };
 
-  const verifyTokenWithDjango = async (idToken) => {
+  const verifyTokenWithDjango = async (idToken) => { /* Same as before */
     try {
       const response = await axios.post(`${API_BASE}/api/auth/firebase-login/`, { id_token: idToken });
       if (response.data.is_new_user) {
@@ -126,19 +132,20 @@ export default function Auth({ navigation }) {
       } else {
         await AsyncStorage.setItem('access_token', response.data.access);
         await AsyncStorage.setItem('refresh_token', response.data.refresh);
-        Alert.alert("Welcome Back!", "Login Successful");
         navigation.navigate('Lobby'); 
       }
-    } catch (error) {
-      Alert.alert("Login Failed", "Could not verify with server.");
-    } finally {
-      setLoading(false);
-    }
+    } catch (error) { Alert.alert("Login Failed", "Could not verify."); } 
+    finally { setLoading(false); }
   };
 
   const handleRegistrationSubmit = async () => {
+    // 🔴 NAYA: Legal Validations
+    if (!isAgeVerified) return Alert.alert("Hold On!", "You must confirm you are 18+ years old.");
+    if (!regData.state || !regData.district) return Alert.alert("Hold On!", "Select your State and District.");
+    if (BANNED_STATES.includes(regData.state)) {
+      return Alert.alert("Restricted Region", "Real-money gaming is legally restricted in your state as per government guidelines.");
+    }
     if (!regData.live_photo) return Alert.alert("Hold On!", "Please capture KYC Live Photo.");
-    if (!regData.state || !regData.district) return Alert.alert("Hold On!", "Please select your State and District.");
     if (loginMethod === 'google' && !regData.phone) return Alert.alert("Hold On!", "Phone number is mandatory.");
     
     setLoading(true);
@@ -148,11 +155,8 @@ export default function Auth({ navigation }) {
       await AsyncStorage.setItem('refresh_token', response.data.refresh);
       Alert.alert("Success", `Gamer Tag: ${response.data.username}`);
       navigation.navigate('Lobby'); 
-    } catch (error) {
-      Alert.alert("Error", error.response?.data?.error || "Registration Failed.");
-    } finally {
-      setLoading(false);
-    }
+    } catch (error) { Alert.alert("Error", error.response?.data?.error || "Registration Failed."); } 
+    finally { setLoading(false); }
   };
 
   return (
@@ -183,44 +187,25 @@ export default function Auth({ navigation }) {
 
               <View style={styles.inputWrapper}><CalendarDays size={20} color="#64748b" style={styles.icon} /><TextInput style={styles.input} placeholder="DOB (YYYY-MM-DD)" placeholderTextColor="#64748b" onChangeText={(val) => setRegData({...regData, dob: val})} /></View>
             
-              {/* 🔴 NAYA: State & District Dropdown for APK */}
               <View style={{ marginBottom: 15, gap: 10 }}>
                 <View style={styles.pickerWrapper}>
-                  <Picker
-                    selectedValue={regData.state}
-                    style={styles.picker}
-                    dropdownIconColor="#64748b"
-                    onValueChange={(itemValue) => setRegData({...regData, state: itemValue, district: ''})}
-                  >
+                  <Picker selectedValue={regData.state} style={styles.picker} dropdownIconColor="#64748b" onValueChange={(itemValue) => setRegData({...regData, state: itemValue, district: ''})}>
                     <Picker.Item label="Select State" value="" color="#64748b" />
                     {Object.keys(INDIA_STATES).map(state => <Picker.Item key={state} label={state} value={state} color="#fff" />)}
                   </Picker>
                 </View>
 
                 <View style={[styles.pickerWrapper, !regData.state && { opacity: 0.5 }]}>
-                  <Picker
-                    selectedValue={regData.district}
-                    style={styles.picker}
-                    dropdownIconColor="#64748b"
-                    enabled={!!regData.state}
-                    onValueChange={(itemValue) => setRegData({...regData, district: itemValue})}
-                  >
+                  <Picker selectedValue={regData.district} style={styles.picker} dropdownIconColor="#64748b" enabled={!!regData.state} onValueChange={(itemValue) => setRegData({...regData, district: itemValue})}>
                     <Picker.Item label="Select District" value="" color="#64748b" />
                     {regData.state && INDIA_STATES[regData.state].map(dist => <Picker.Item key={dist} label={dist} value={dist} color="#fff" />)}
                   </Picker>
                 </View>
               </View>
 
-              {/* 🔴 NAYA: Referral Code Input for APK */}
               <View style={styles.inputWrapper}>
                 <Gift size={20} color="#f59e0b" style={styles.icon} />
-                <TextInput 
-                  style={styles.input} 
-                  placeholder="Referral Code (Optional)" 
-                  placeholderTextColor="#64748b" 
-                  autoCapitalize="characters"
-                  onChangeText={(val) => setRegData({...regData, referred_by: val.toUpperCase()})} 
-                />
+                <TextInput style={styles.input} placeholder="Referral Code (Optional)" placeholderTextColor="#64748b" autoCapitalize="characters" onChangeText={(val) => setRegData({...regData, referred_by: val.toUpperCase()})} />
               </View>
 
               <View style={styles.cameraBox}>
@@ -236,6 +221,12 @@ export default function Auth({ navigation }) {
                   <TouchableOpacity style={styles.openCameraBtn} onPress={openCamera}><Camera size={20} color="#cbd5e1" /><Text style={{ color: '#cbd5e1', fontWeight: 'bold', marginLeft: 8 }}>Open Camera</Text></TouchableOpacity>
                 )}
               </View>
+
+              {/* 🔴 NAYA: Age Checkbox */}
+              <TouchableOpacity style={styles.checkboxRow} onPress={() => setIsAgeVerified(!isAgeVerified)}>
+                {isAgeVerified ? <CheckSquare size={20} color="#10b981" /> : <Square size={20} color="#64748b" />}
+                <Text style={styles.checkboxText}>I certify that I am 18+ years old and not playing from restricted states.</Text>
+              </TouchableOpacity>
 
               <TouchableOpacity activeOpacity={0.8} onPress={handleRegistrationSubmit} disabled={loading}>
                 <LinearGradient colors={['#10b981', '#059669']} style={styles.submitBtn}>
@@ -264,15 +255,18 @@ export default function Auth({ navigation }) {
                         <View style={styles.prefixBox}><Text style={styles.prefixText}>+91</Text></View>
                         <TextInput style={[styles.input, { flex: 1, backgroundColor: '#0f172a', paddingHorizontal: 15, borderRadius: 12 }]} placeholder="Mobile Number" placeholderTextColor="#64748b" keyboardType="numeric" maxLength={10} value={phone} onChangeText={setPhone} />
                       </View>
-                      <TouchableOpacity activeOpacity={0.8} onPress={sendOTP} disabled={loading} style={{ marginTop: 20 }}>
-                        <LinearGradient colors={['#2563eb', '#4f46e5']} style={styles.submitBtn}>{loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>SECURE OTP LOGIN</Text>}</LinearGradient>
+                      <TouchableOpacity activeOpacity={0.8} onPress={sendOTP} disabled={loading || timer > 0} style={{ marginTop: 20 }}>
+                        {/* 🔴 NAYA: OTP Timer UI */}
+                        <LinearGradient colors={timer > 0 ? ['#475569', '#334155'] : ['#2563eb', '#4f46e5']} style={styles.submitBtn}>
+                          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>{timer > 0 ? `RESEND IN ${timer}S` : "SECURE OTP LOGIN"}</Text>}
+                        </LinearGradient>
                       </TouchableOpacity>
                     </>
                   ) : (
                     <>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
                         <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold' }}>Sent to +91 {phone}</Text>
-                        <TouchableOpacity onPress={() => setOtpSent(false)}><Text style={{ color: '#60a5fa', fontSize: 12, fontWeight: 'bold' }}>EDIT</Text></TouchableOpacity>
+                        <TouchableOpacity onPress={() => { setOtpSent(false); setTimer(0); }}><Text style={{ color: '#60a5fa', fontSize: 12, fontWeight: 'bold' }}>EDIT</Text></TouchableOpacity>
                       </View>
                       <TextInput style={styles.otpInput} placeholder="------" placeholderTextColor="#334155" keyboardType="numeric" maxLength={6} value={otp} onChangeText={setOtp} secureTextEntry />
                       <TouchableOpacity activeOpacity={0.8} onPress={verifyOTP} disabled={loading} style={{ marginTop: 20 }}>
@@ -317,11 +311,8 @@ const styles = StyleSheet.create({
   prefixBox: { backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#1e293b', borderRadius: 12, paddingHorizontal: 20, justifyContent: 'center', alignItems: 'center' },
   prefixText: { color: '#64748b', fontWeight: '900', fontSize: 16 },
   input: { color: '#fff', fontSize: 16, fontWeight: 'bold', flex: 1 },
-  
-  // 🔴 NAYA: Picker Styles
   pickerWrapper: { backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#1e293b', borderRadius: 12, height: 55, justifyContent: 'center' },
   picker: { color: '#fff' },
-
   otpInput: { backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#1e293b', borderRadius: 12, color: '#fff', fontSize: 32, fontWeight: '900', textAlign: 'center', letterSpacing: 10, paddingVertical: 15 },
   submitBtn: { paddingVertical: 18, borderRadius: 16, alignItems: 'center', justifyContent: 'center', shadowColor: '#3b82f6', shadowOpacity: 0.4, shadowRadius: 10 },
   btnText: { color: '#fff', fontSize: 14, fontWeight: '900', letterSpacing: 1 },
@@ -337,5 +328,10 @@ const styles = StyleSheet.create({
   captureBtn: { position: 'absolute', bottom: 10, alignSelf: 'center', backgroundColor: '#2563eb', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 10 },
   profilePic: { width: 100, height: 100, borderRadius: 50, borderWidth: 3, borderColor: '#10b981' },
   retakeText: { color: '#60a5fa', fontSize: 12, fontWeight: 'bold', marginTop: 10, textDecorationLine: 'underline' },
+  
+  // 🔴 NAYA: Checkbox Styles
+  checkboxRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, paddingRight: 15 },
+  checkboxText: { color: '#94a3b8', fontSize: 10, fontWeight: 'bold', marginLeft: 10, lineHeight: 16 },
+  
   footerText: { color: '#475569', fontSize: 10, fontWeight: 'bold', textAlign: 'center', marginTop: 30, letterSpacing: 1, textTransform: 'uppercase' }
 });

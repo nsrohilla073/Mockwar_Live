@@ -71,28 +71,50 @@ export default function Arena({ route, navigation }) {
   useEffect(() => { accuracyRef.current = accuracy; }, [accuracy]);
 
   // 🎵 Native Audio Playback Helper
+   const soundRefs = useRef({}); // Store preloaded sounds
+
+  useEffect(() => {
+    // Preload sounds when Arena opens
+    const preloadSounds = async () => {
+      try {
+        const tick = await Audio.Sound.createAsync(require('./assets/sounds/tick.mp3'));
+        const correct = await Audio.Sound.createAsync(require('./assets/sounds/correct.mp3'));
+        const wrong = await Audio.Sound.createAsync(require('./assets/sounds/wrong.mp3'));
+        const win = await Audio.Sound.createAsync(require('./assets/sounds/win.mp3'));
+        const lose = await Audio.Sound.createAsync(require('./assets/sounds/lose.mp3'));
+        const matchFound = await Audio.Sound.createAsync(require('./assets/sounds/match-found.mp3'));
+
+        soundRefs.current = {
+          'tick.mp3': tick.sound,
+          'correct.mp3': correct.sound,
+          'wrong.mp3': wrong.sound,
+          'win.mp3': win.sound,
+          'lose.mp3': lose.sound,
+          'match-found.mp3': matchFound.sound
+        };
+      } catch (error) {
+        console.log("Audio Preload Error:", error);
+      }
+    };
+    preloadSounds();
+
+    // Cleanup memory when leaving Arena
+    return () => {
+      Object.values(soundRefs.current).forEach(async (soundObj) => {
+        try { await soundObj.unloadAsync(); } catch (e) {}
+      });
+    };
+  }, []);
+
   const playSound = async (soundFileName) => {
     if (!soundEnabled) return;
     try {
-      let soundAsset;
-      switch (soundFileName) {
-        case 'match-found.mp3': soundAsset = require('./assets/sounds/match-found.mp3'); break;
-        case 'tick.mp3': soundAsset = require('./assets/sounds/tick.mp3'); break;
-        case 'correct.mp3': soundAsset = require('./assets/sounds/correct.mp3'); break;
-        case 'wrong.mp3': soundAsset = require('./assets/sounds/wrong.mp3'); break;
-        case 'win.mp3': soundAsset = require('./assets/sounds/win.mp3'); break;
-        case 'lose.mp3': soundAsset = require('./assets/sounds/lose.mp3'); break;
-      }
-      
-      if (soundAsset) {
-        const { sound } = await Audio.Sound.createAsync(soundAsset);
-        await sound.playAsync();
-        sound.setOnPlaybackStatusUpdate((status) => {
-          if (status.didJustFinish) sound.unloadAsync(); // Memory management
-        });
+      const soundObj = soundRefs.current[soundFileName];
+      if (soundObj) {
+        await soundObj.replayAsync(); // Use replay to play instantly without reloading
       }
     } catch (error) {
-      console.log("Audio Error: Make sure assets/sounds folder exists!", error);
+      console.log("Play Error", error);
     }
   };
 
