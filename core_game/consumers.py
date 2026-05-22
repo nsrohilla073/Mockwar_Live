@@ -1,3 +1,5 @@
+# core_game/consumers.py
+
 import json
 import random
 import re
@@ -21,7 +23,6 @@ def generate_ai_content(table_id):
             
         genai.configure(api_key=api_key)
         
-        # 🔴 NAYA: ID se table fetch kar rahe hain
         table = GameTable.objects.filter(id=table_id).first()
         if not table:
             table = GameTable.objects.first()
@@ -101,7 +102,6 @@ def generate_ai_content(table_id):
 
 class GameConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        # 🔴 NAYA: Slug ko hata kar Table ID kar diya
         self.table_id = self.scope['url_route']['kwargs']['table_id']
         self.room_id = self.scope['url_route']['kwargs']['room_id']
         self.room_group_name = f'arena_table_{self.table_id}_{self.room_id}'
@@ -139,7 +139,6 @@ class GameConsumer(AsyncWebsocketConsumer):
             is_first = await self.check_and_lock_questions(lock_key)
             
             if is_first:
-                # 🔴 NAYA: Table ID pass ki gayi hai
                 content = await generate_ai_content(self.table_id)
                 await self.channel_layer.group_send(
                     self.room_group_name, 
@@ -163,11 +162,10 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     async def process_game_finish(self, player_name, final_score, wpm):
         # 🔴 FIX 3: ANTI-CHEAT VALIDATION (God-Mode Hacker Block)
-        # Agar hacker ne frontend se cheat karke impossible score bheja, toh usko 0 kar do
         if wpm > 250: 
             final_score = 0
             wpm = 0
-        if final_score > 5000: # Quiz mein itna score possible nahi hai
+        if final_score > 5000: 
             final_score = 0
 
         table_max_players = await self.get_table_max_players(self.table_id)
@@ -194,7 +192,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 "losers": losers,
                 "is_draw": is_draw,
                 "players": state['players'],
-                "claimed_users": [] # Track who took the money
+                "claimed_users": [] 
             }
             await self.set_cache(result_cache_key, final_result_data, 300) 
 
@@ -212,3 +210,6 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.delete_cache(cache_key)
         else:
             await self.send(text_data=json.dumps({'action': 'waiting_for_opponent', 'message': f"Waiting for others..."}))
+
+    async def game_message(self, event):
+        await self.send(text_data=json.dumps(event))
