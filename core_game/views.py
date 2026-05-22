@@ -314,7 +314,7 @@ class GetGameContentAPIView(APIView):
             traceback.print_exc() 
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-# 🔴 FIX: SubmitGameResult ko Table ID par set kiya
+
 class SubmitGameResultAPIView(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
@@ -345,7 +345,7 @@ class SubmitGameResultAPIView(APIView):
             with transaction.atomic():
                 wallet = Wallet.objects.select_for_update().get(user=user)
                 
-                # 🔴 FIX: 1 Minute ki jagah 10 Seconds ka lock
+              
                 already_submitted = MatchHistory.objects.filter(
                     user=user, table=table, 
                     played_at__gte=timezone.now() - timezone.timedelta(seconds=10)
@@ -372,7 +372,7 @@ class SubmitGameResultAPIView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-# 🔴 FIX: Leaderboard ko Table ID par set kiya
+
 class LeaderboardAPIView(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]

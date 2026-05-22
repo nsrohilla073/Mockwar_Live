@@ -125,7 +125,6 @@ class GameConsumer(AsyncWebsocketConsumer):
             return True
         return False
         
-    # 🔴 NAYA: Database se ID se max_players nikalne ka function
     @database_sync_to_async
     def get_table_max_players(self, t_id):
         table = GameTable.objects.filter(id=t_id).first()
@@ -163,7 +162,7 @@ class GameConsumer(AsyncWebsocketConsumer):
     def delete_cache(self, key): cache.delete(key)
 
     async def process_game_finish(self, player_name, final_score, wpm):
-        # 🔴 NAYA: DB se limit table_id se li jayegi
+
         table_max_players = await self.get_table_max_players(self.table_id)
 
         cache_key = f"match_state_{self.room_group_name}"
@@ -191,7 +190,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                     'action': 'match_result', 
                     'winners': winners, 
                     'losers': losers, 
-                    'is_draw': len(winners) == table_max_players, # Draw sirf tab jab SABKA score exactly same ho
+                    'is_draw': len(winners) == table_max_players, 
                     'final_scores': state['players']
                 }
             )

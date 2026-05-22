@@ -7,4 +7,4 @@ class CoreGameConfig(AppConfig):
     name = 'core_game'
 
     def ready(self):
-        import core_game.signals  # <-- यह हमारे सिग्नल को लोड करेगा
+        import core_game.signals  

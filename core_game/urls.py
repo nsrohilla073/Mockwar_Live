@@ -15,7 +15,7 @@ from .views import (
     GetGameContentAPIView,
     PlayGameAPIView,
     SubmitGameResultAPIView,
-    LeaderboardAPIView,  # 🔥 FIX: सही नाम यहाँ आ गया है
+    LeaderboardAPIView,  
     
     UserDashboardHistoryAPIView,
     UserProfileAPIView
